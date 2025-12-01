@@ -1,0 +1,1504 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Asteroid Hunter</title>
+    <style>
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: black;
+            font-family: 'Courier New', Courier, monospace;
+        }
+
+        canvas {
+            display: block;
+        }
+
+        #hud {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #0ff;
+            font-size: 18px;
+            pointer-events: auto;
+            text-shadow: 0 0 5px #0ff;
+            background-color: rgba(0, 255, 255, 0.3);
+            /* 30% opacity cyan */
+            padding: 8px;
+            border-radius: 5px;
+            border: 1px solid rgba(0, 255, 255, 0.3);
+            cursor: pointer;
+            user-select: none;
+            -webkit-user-select: none;
+            z-index: 100;
+            width: auto;
+            /* Allow width to fit content */
+        }
+
+        .hud-row {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            margin-bottom: 5px;
+        }
+
+        .hud-label {
+            font-size: 16px;
+            /* Slightly larger for readability */
+            color: #fff;
+            margin-right: 10px;
+            text-shadow: 0 0 3px #000;
+            text-align: right;
+            width: 100px;
+            /* Fixed width for alignment */
+            font-family: 'Courier New', Courier, monospace;
+            /* Ensure font */
+        }
+
+        .bar-container {
+            width: 150px;
+            /* Fixed width for bars */
+            height: 15px;
+            /* Slightly taller */
+            background-color: rgba(255, 255, 255, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+            border-radius: 0;
+            /* Square corners */
+            overflow: hidden;
+        }
+
+        .bar-fill {
+            height: 100%;
+            width: 100%;
+            transition: width 0.2s ease-out, background-color 0.2s;
+        }
+
+        #shieldBar {
+            background-color: #0ff;
+            box-shadow: 0 0 5px #0ff;
+        }
+
+        #asteroidBar {
+            background-color: #f0a;
+            /* Magenta/Purple for alien threat? Or Orange? Let's go Orange */
+            background-color: #ffaa00;
+            box-shadow: 0 0 5px #ffaa00;
+        }
+
+        #gameOver,
+        #welcomeScreen,
+        #winScreen {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #ff3333;
+            font-size: 48px;
+            text-align: center;
+            display: none;
+            text-shadow: 0 0 10px #f00;
+            z-index: 200;
+        }
+
+        #welcomeScreen {
+            color: #0ff;
+            text-shadow: 0 0 10px #0ff;
+            display: block;
+            /* Show by default */
+        }
+
+        #winScreen {
+            color: #0f0;
+            text-shadow: 0 0 10px #0f0;
+        }
+
+        .sub-text {
+            font-size: 24px;
+            color: #fff;
+            margin-top: 20px;
+            text-shadow: 0 0 5px #fff;
+        }
+
+        /* Mobile Controls */
+        #controls {
+            position: absolute;
+            bottom: 20px;
+            left: 0;
+            width: 100%;
+            height: 150px;
+            pointer-events: none;
+            display: flex;
+            justify-content: space-between;
+            padding: 0 20px;
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+            z-index: 150;
+        }
+
+        /* Hide controls on devices with fine pointers (mouse) */
+        @media (pointer: fine) {
+            #controls {
+                display: none;
+            }
+
+            .mobile-instructions {
+                display: none;
+            }
+        }
+
+        /* Hide desktop instructions on coarse pointer devices */
+        @media (pointer: coarse) {
+            .desktop-instructions {
+                display: none;
+            }
+        }
+
+        .fs-btn {
+            background: rgba(0, 255, 255, 0.2);
+            border: 1px solid #0ff;
+            color: #0ff;
+            padding: 10px 20px;
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 18px;
+            cursor: pointer;
+            margin-top: 15px;
+            border-radius: 5px;
+            transition: background 0.2s;
+        }
+
+        .fs-btn:hover {
+            background: rgba(0, 255, 255, 0.4);
+        }
+
+        .control-group {
+            display: flex;
+            gap: 20px;
+            pointer-events: auto;
+            align-items: flex-end;
+        }
+
+        .control-btn {
+            width: 80px;
+            height: 80px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(0, 255, 255, 0.5);
+            border-radius: 50%;
+            color: #0ff;
+            font-size: 30px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            touch-action: none;
+            cursor: pointer;
+            backdrop-filter: blur(2px);
+        }
+
+        .control-btn:active,
+        .control-btn.active {
+            background: rgba(0, 255, 255, 0.3);
+            transform: scale(0.95);
+        }
+
+        /* Joystick Styles */
+        #joystickContainer {
+            width: 120px;
+            height: 120px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid rgba(0, 255, 255, 0.5);
+            border-radius: 50%;
+            position: relative;
+            backdrop-filter: blur(2px);
+            touch-action: none;
+        }
+
+        #joystickKnob {
+            width: 50px;
+            height: 50px;
+            background: rgba(0, 255, 255, 0.5);
+            border-radius: 50%;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 10px #0ff;
+            pointer-events: none;
+            /* Let container handle events */
+        }
+    </style>
+</head>
+
+<body>
+    <div id="hud">
+        <div class="hud-row">
+            <div class="hud-label">Shield</div>
+            <div class="bar-container">
+                <div id="shieldBar" class="bar-fill" style="width: 100%;"></div>
+            </div>
+        </div>
+        <div class="hud-row">
+            <div class="hud-label">Asteroids</div>
+            <div class="bar-container">
+                <div id="asteroidBar" class="bar-fill" style="width: 100%;"></div>
+            </div>
+        </div>
+    </div>
+    <div id="gameOver">
+        GAME OVER<br>
+        <div class="sub-text">Press ENTER or Tap to Restart</div>
+    </div>
+    <div id="welcomeScreen">
+        ASTEROID HUNTER<br>
+        <div class="sub-text" style="font-size: 20px; margin-bottom: 20px;">
+            <div class="desktop-instructions">Desktop: Arrow Keys to Move, Up to Thrust, Space to Shoot</div>
+            <div class="mobile-instructions">Mobile: Joystick to Steer, Button to Thrust, Tap to Shoot</div>
+        </div>
+        <div class="sub-text">Press ENTER or Tap to Start</div>
+        <button id="fsBtn" class="fs-btn">Toggle Full Screen</button>
+        <div style="font-size: 14px; margin-top: 10px; color: #aaa;">(Tip: Press HUD to Toggle Full Screen during play)
+        </div>
+    </div>
+    <div id="winScreen">
+        ALL CLEARED!<br>
+        <div class="sub-text">Press ENTER or Tap to Play Again</div>
+    </div>
+
+    <!-- Mobile Controls -->
+    <div id="controls">
+        <div class="control-group">
+            <div id="joystickContainer">
+                <div id="joystickKnob"></div>
+            </div>
+        </div>
+        <div class="control-group">
+            <div class="control-btn" id="btnThrust">↑</div>
+        </div>
+    </div>
+    <canvas id="starCanvas"></canvas>
+    <script>
+        const canvas = document.getElementById('starCanvas');
+        const ctx = canvas.getContext('2d');
+        const shieldBar = document.getElementById('shieldBar');
+        const asteroidBar = document.getElementById('asteroidBar');
+        // const missilesEl = document.getElementById('missilesVal'); // Removed
+        // const hitsEl = document.getElementById('hitsVal'); // Removed
+        // const asteroidsEl = document.getElementById('asteroidsVal'); // Removed
+        const gameOverEl = document.getElementById('gameOver');
+        const welcomeEl = document.getElementById('welcomeScreen');
+        const winEl = document.getElementById('winScreen');
+        const controlsEl = document.getElementById('controls');
+
+        let width, height;
+        let stars = [];
+        let asteroids = [];
+        let particles = [];
+        let exhaustParticles = [];
+        let cometSmokeParticles = [];
+        let debrisParticles = []; // For ship explosion
+        let missiles = [];
+        let comets = [];
+        let cometSpawnTimer = 0;
+        const COMET_SPAWN_INTERVAL = 300; // ~5 seconds at 60fps
+        let explosionRings = [];
+        let ship;
+        let gameState = 'welcome'; // 'welcome', 'playing', 'gameover', 'won'
+
+        // Game Stats
+        let stats = {
+            missilesFired: 0,
+            asteroidsHit: 0
+        };
+
+        const numStars = 300;
+        // Get number of asteroids from URL or default to 10
+        const urlParams = new URLSearchParams(window.location.search);
+        const numAsteroids = parseInt(urlParams.get('asteroids')) || 10;
+        const MIN_ASTEROID_SIZE = 15;
+
+        // Input handling
+        const keys = {
+            ArrowUp: false,
+            ArrowLeft: false,
+            ArrowRight: false,
+            Space: false,
+            Enter: false
+        };
+
+        window.addEventListener('keydown', (e) => {
+            if (e.code === 'Space' && !keys.Space) {
+                if (gameState === 'playing') shootMissile();
+            }
+            if (e.code === 'Enter') {
+                if (gameState === 'gameover' || gameState === 'won') {
+                    resetGame();
+                } else if (gameState === 'welcome') {
+                    startGame();
+                }
+            }
+            if (keys.hasOwnProperty(e.code) || e.code === 'Space' || e.code === 'Enter') keys[e.code] = true;
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (keys.hasOwnProperty(e.code) || e.code === 'Space' || e.code === 'Enter') keys[e.code] = false;
+        });
+
+        // Touch Controls
+        const btnThrust = document.getElementById('btnThrust');
+        const joystickContainer = document.getElementById('joystickContainer');
+        const joystickKnob = document.getElementById('joystickKnob');
+
+        function setupTouchControl(elem, code) {
+            const handleStart = (e) => {
+                e.preventDefault();
+                keys[code] = true;
+                elem.classList.add('active');
+            };
+            const handleEnd = (e) => {
+                e.preventDefault();
+                keys[code] = false;
+                elem.classList.remove('active');
+            };
+
+            elem.addEventListener('touchstart', handleStart, { passive: false });
+            elem.addEventListener('touchend', handleEnd, { passive: false });
+            elem.addEventListener('mousedown', handleStart);
+            elem.addEventListener('mouseup', handleEnd);
+            elem.addEventListener('mouseleave', handleEnd);
+        }
+
+        setupTouchControl(btnThrust, 'ArrowUp');
+
+        // Joystick Logic
+        let joystickActive = false;
+        let joystickAngle = 0;
+        let joystickCenter = { x: 0, y: 0 };
+        const maxRadius = 35; // Max distance knob can move
+
+        function handleJoystickStart(e) {
+            e.preventDefault();
+            joystickActive = true;
+            const rect = joystickContainer.getBoundingClientRect();
+            joystickCenter = {
+                x: rect.left + rect.width / 2,
+                y: rect.top + rect.height / 2
+            };
+            handleJoystickMove(e);
+        }
+
+        function handleJoystickMove(e) {
+            if (!joystickActive) return;
+            e.preventDefault();
+
+            let clientX, clientY;
+            if (e.touches) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            } else {
+                clientX = e.clientX;
+                clientY = e.clientY;
+            }
+
+            // We care about both axes now
+            let deltaX = clientX - joystickCenter.x;
+            let deltaY = clientY - joystickCenter.y;
+
+            const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+            // Clamp visually
+            if (distance > maxRadius) {
+                const ratio = maxRadius / distance;
+                deltaX *= ratio;
+                deltaY *= ratio;
+            }
+
+            // Update knob position
+            joystickKnob.style.transform = `translate(calc(-50% + ${deltaX}px), calc(-50% + ${deltaY}px))`;
+
+            // Calculate angle
+            joystickAngle = Math.atan2(deltaY, deltaX);
+        }
+
+        function handleJoystickEnd(e) {
+            e.preventDefault();
+            joystickActive = false;
+            // keys.ArrowLeft = false; // No longer used for joystick
+            // keys.ArrowRight = false;
+            joystickKnob.style.transform = `translate(-50%, -50%)`;
+        }
+
+        joystickContainer.addEventListener('touchstart', handleJoystickStart, { passive: false });
+        joystickContainer.addEventListener('touchmove', handleJoystickMove, { passive: false });
+        joystickContainer.addEventListener('touchend', handleJoystickEnd, { passive: false });
+
+        // Mouse support for testing
+        joystickContainer.addEventListener('mousedown', handleJoystickStart);
+        window.addEventListener('mousemove', handleJoystickMove);
+        window.addEventListener('mouseup', handleJoystickEnd);
+
+
+        // Full Screen Toggle Button
+        const fsBtn = document.getElementById('fsBtn');
+        fsBtn.addEventListener('click', (e) => {
+            e.stopPropagation(); // Prevent starting game
+            toggleFullScreen();
+        });
+        // Also handle touch for button to prevent ghost clicks or issues
+        fsBtn.addEventListener('touchstart', (e) => {
+            e.stopPropagation();
+            toggleFullScreen();
+        }, { passive: false });
+
+        function toggleFullScreen() {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    console.log(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+                });
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
+
+        // Full Screen Toggle (HUD)
+        const hud = document.getElementById('hud');
+        hud.addEventListener('click', () => {
+            toggleFullScreen();
+        });
+        // Prevent HUD click from firing missiles (stop propagation)
+        hud.addEventListener('touchstart', (e) => e.stopPropagation());
+        hud.addEventListener('mousedown', (e) => e.stopPropagation());
+
+
+        // Tap to fire (anywhere else)
+        window.addEventListener('touchstart', (e) => {
+            // Check if target is a control button or full screen button
+            if (e.target.closest('.control-btn') || e.target.closest('.fs-btn')) return;
+
+            if (gameState === 'playing') {
+                shootMissile();
+            } else if (gameState === 'gameover' || gameState === 'won') {
+                resetGame();
+            } else if (gameState === 'welcome') {
+                startGame();
+            }
+        }, { passive: false });
+
+        // Also support click for desktop testing of "tap to fire"
+        window.addEventListener('mousedown', (e) => {
+            // Check if target is a control button or full screen button
+            if (e.target.closest('.control-btn') || e.target.closest('.fs-btn')) return;
+
+            if (gameState === 'playing') {
+                shootMissile();
+            } else if (gameState === 'gameover' || gameState === 'won') {
+                resetGame();
+            } else if (gameState === 'welcome') {
+                startGame();
+            }
+        });
+
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width;
+            canvas.height = height;
+            initStars();
+            // Don't reset if playing, just resize. 
+            // But if we want to ensure ship stays on screen, maybe clamp?
+            // For now, just let it be.
+        }
+
+        function startGame() {
+            gameState = 'playing';
+            welcomeEl.style.display = 'none';
+            resetGame();
+        }
+
+        function resetGame() {
+            gameState = 'playing';
+            gameOverEl.style.display = 'none';
+            winEl.style.display = 'none';
+            welcomeEl.style.display = 'none';
+            updateUIVisibility();
+            stats.missilesFired = 0;
+            stats.asteroidsHit = 0;
+
+            ship = new Ship();
+            missiles = [];
+            particles = [];
+            exhaustParticles = [];
+            cometSmokeParticles = [];
+            debrisParticles = [];
+            explosionRings = [];
+            comets = [];
+            cometSpawnTimer = 0;
+            initAsteroids();
+            updateHUD(); // Ensure HUD is reset
+        }
+
+
+
+        function calculateTotalMass() {
+            let total = 0;
+            asteroids.forEach(a => {
+                total += a.size * a.size; // Area approximation
+            });
+            return total;
+        }
+
+        function updateHUD() {
+            if (ship) {
+                const shieldPercent = Math.max(0, Math.min(100, ship.shield));
+                shieldBar.style.width = shieldPercent + '%';
+
+                // Color code shields
+                if (shieldPercent < 30) {
+                    shieldBar.style.backgroundColor = '#f00';
+                    shieldBar.style.boxShadow = '0 0 5px #f00';
+                } else if (shieldPercent < 60) {
+                    shieldBar.style.backgroundColor = '#ff0';
+                    shieldBar.style.boxShadow = '0 0 5px #ff0';
+                } else {
+                    shieldBar.style.backgroundColor = '#0ff';
+                    shieldBar.style.boxShadow = '0 0 5px #0ff';
+                }
+            } else {
+                shieldBar.style.width = '0%';
+            }
+
+            const currentMass = calculateTotalMass();
+            // Avoid division by zero
+            const massPercent = initialTotalMass > 0 ? (currentMass / initialTotalMass) * 100 : 0;
+            asteroidBar.style.width = Math.max(0, Math.min(100, massPercent)) + '%';
+        }
+
+        function updateUIVisibility() {
+            if (gameState === 'playing') {
+                hud.style.display = 'block';
+                // For controls, we want to respect the media query if possible, 
+                // but setting display='flex' overrides it. 
+                // A better way is to add/remove a 'hidden' class or set visibility.
+                // But for now, let's just check if it's mobile or assume the CSS handles desktop hiding
+                // actually, setting style.display = '' removes the inline style, letting CSS take over.
+                controlsEl.style.display = '';
+            } else {
+                hud.style.display = 'none';
+                controlsEl.style.display = 'none';
+            }
+        }
+
+        class Star {
+            constructor() {
+                this.reset();
+            }
+
+            reset() {
+                this.x = Math.random() * width;
+                this.y = Math.random() * height;
+                this.size = Math.random() * 2 + 0.5;
+                this.opacity = Math.random();
+                this.twinkleSpeed = Math.random() * 0.02 + 0.005;
+                this.direction = Math.random() > 0.5 ? 1 : -1;
+            }
+
+            update(dt) {
+                this.opacity += this.twinkleSpeed * this.direction * dt;
+
+                if (this.opacity >= 1) {
+                    this.opacity = 1;
+                    this.direction = -1;
+                } else if (this.opacity <= 0.1) {
+                    this.opacity = 0.1;
+                    this.direction = 1;
+                }
+            }
+
+            draw() {
+                ctx.fillStyle = `rgba(255, 255, 255, ${this.opacity})`;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        class Particle {
+            constructor(x, y, color = null) {
+                this.x = x;
+                this.y = y;
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 3 + 1;
+                this.vx = Math.cos(angle) * speed;
+                this.vy = Math.sin(angle) * speed;
+                this.life = 1.0;
+                this.decay = Math.random() * 0.03 + 0.02;
+                this.size = Math.random() * 2 + 1;
+                this.color = color || `255, 200, 50`;
+            }
+
+            update(dt) {
+                this.x += this.vx * dt;
+                this.y += this.vy * dt;
+                this.life -= this.decay * dt;
+            }
+
+            draw() {
+                ctx.fillStyle = `rgba(${this.color}, ${this.life})`;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        class Debris {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                const angle = Math.random() * Math.PI * 2;
+                const speed = Math.random() * 4 + 1;
+                this.vx = Math.cos(angle) * speed;
+                this.vy = Math.sin(angle) * speed;
+                this.life = 1.0;
+                this.decay = Math.random() * 0.01 + 0.005;
+                this.angle = Math.random() * Math.PI * 2;
+                this.rotationSpeed = (Math.random() - 0.5) * 0.2;
+                this.size = Math.random() * 5 + 3;
+            }
+
+            update(dt) {
+                this.x += this.vx * dt;
+                this.y += this.vy * dt;
+                this.angle += this.rotationSpeed * dt;
+                this.life -= this.decay * dt;
+            }
+
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.angle);
+                ctx.fillStyle = `rgba(255, 255, 255, ${this.life})`;
+                // Draw a small shard/triangle
+                ctx.beginPath();
+                ctx.moveTo(this.size, 0);
+                ctx.lineTo(-this.size / 2, this.size / 2);
+                ctx.lineTo(-this.size / 2, -this.size / 2);
+                ctx.closePath();
+                ctx.fill();
+                ctx.restore();
+            }
+        }
+
+        class ExhaustParticle {
+            constructor(x, y, angle) {
+                this.x = x;
+                this.y = y;
+                const spread = (Math.random() - 0.5) * 0.5;
+                const speed = Math.random() * 4 + 2;
+                this.vx = Math.cos(angle + spread) * speed;
+                this.vy = Math.sin(angle + spread) * speed;
+                this.life = 1.0;
+                this.decay = Math.random() * 0.05 + 0.02;
+                this.size = Math.random() * 4 + 2;
+
+                const rand = Math.random();
+                if (rand < 0.3) this.color = `255, 50, 0`;
+                else if (rand < 0.6) this.color = `255, 150, 0`;
+                else if (rand < 0.8) this.color = `255, 255, 0`;
+                else this.color = `100, 100, 100`;
+            }
+
+            update(dt) {
+                this.x += this.vx * dt;
+                this.y += this.vy * dt;
+                this.life -= this.decay * dt;
+                this.size *= Math.pow(0.95, dt); // Approximate exponential decay
+            }
+
+            draw() {
+                ctx.fillStyle = `rgba(${this.color}, ${this.life})`;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        class ExplosionRing {
+            constructor(x, y) {
+                this.x = x;
+                this.y = y;
+                this.radius = 1;
+                this.maxRadius = 25;
+                this.alpha = 1;
+                this.color = '0, 255, 255';
+            }
+
+            update(dt) {
+                this.radius += 1.5 * dt;
+                this.alpha -= 0.04 * dt;
+            }
+
+            draw() {
+                ctx.save();
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.strokeStyle = `rgba(${this.color}, ${this.alpha})`;
+                ctx.lineWidth = 2;
+                ctx.stroke();
+                ctx.restore();
+            }
+        }
+
+        class Missile {
+            constructor(x, y, angle) {
+                this.x = x;
+                this.y = y;
+                this.angle = angle;
+                this.speed = 7;
+                this.vx = Math.cos(angle) * this.speed;
+                this.vy = Math.sin(angle) * this.speed;
+                this.life = 60;
+                this.size = 3;
+            }
+
+            update(dt) {
+                this.x += this.vx * dt;
+                this.y += this.vy * dt;
+                this.life -= 1 * dt;
+
+                if (this.x < 0) this.x = width;
+                if (this.x > width) this.x = 0;
+                if (this.y < 0) this.y = height;
+                if (this.y > height) this.y = 0;
+            }
+
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.angle);
+                ctx.fillStyle = '#0ff';
+                ctx.fillRect(-this.size, -this.size, this.size * 2, this.size * 2);
+                ctx.restore();
+            }
+        }
+
+        class Ship {
+            constructor() {
+                this.x = width / 2;
+                this.y = height / 2;
+                this.vx = 0;
+                this.vy = 0;
+                this.angle = -Math.PI / 2;
+                this.size = 15;
+                this.rotationSpeed = 0.12; // Faster rotation
+                this.thrust = 0.15;
+                this.friction = 0.98;
+                this.shield = 100;
+                this.shieldHits = [];
+            }
+
+            update(dt) {
+                if (keys.ArrowLeft) this.angle -= this.rotationSpeed * dt;
+                if (keys.ArrowRight) this.angle += this.rotationSpeed * dt;
+
+                // Joystick Control
+                if (joystickActive) {
+                    // Normalize angles to 0-2PI
+                    let currentAngle = (this.angle % (Math.PI * 2));
+                    if (currentAngle < 0) currentAngle += Math.PI * 2;
+
+                    let targetAngle = (joystickAngle % (Math.PI * 2));
+                    if (targetAngle < 0) targetAngle += Math.PI * 2;
+
+                    let diff = targetAngle - currentAngle;
+
+                    // Shortest path
+                    if (diff > Math.PI) diff -= Math.PI * 2;
+                    if (diff < -Math.PI) diff += Math.PI * 2;
+
+                    // Rotate towards target
+                    if (Math.abs(diff) > 0.05) { // Deadzone to stop jitter
+                        const step = this.rotationSpeed * dt;
+                        if (Math.abs(diff) < step) {
+                            this.angle = joystickAngle;
+                        } else {
+                            this.angle += Math.sign(diff) * step;
+                        }
+                    }
+                }
+
+                if (keys.ArrowUp) {
+                    this.vx += Math.cos(this.angle) * this.thrust * dt;
+                    this.vy += Math.sin(this.angle) * this.thrust * dt;
+
+                    const backX = this.x - Math.cos(this.angle) * this.size;
+                    const backY = this.y - Math.sin(this.angle) * this.size;
+                    exhaustParticles.push(new ExhaustParticle(backX, backY, this.angle + Math.PI));
+                }
+
+                // Friction is per frame, so we need to adjust for dt
+                // frameFriction = 0.98
+                // dtFriction = Math.pow(0.98, dt)
+                const dtFriction = Math.pow(this.friction, dt);
+                this.vx *= dtFriction;
+                this.vy *= dtFriction;
+
+                this.x += this.vx * dt;
+                this.y += this.vy * dt;
+
+                if (this.x < 0) this.x = width;
+                if (this.x > width) this.x = 0;
+                if (this.y < 0) this.y = height;
+                if (this.y > height) this.y = 0;
+
+                // Update shield hits
+                for (let i = this.shieldHits.length - 1; i >= 0; i--) {
+                    this.shieldHits[i].life -= 0.05 * dt;
+                    if (this.shieldHits[i].life <= 0) {
+                        this.shieldHits.splice(i, 1);
+                    }
+                }
+            }
+
+            hit(angle) {
+                this.shield -= 10;
+                if (this.shield < 0) this.shield = 0;
+                this.shieldHits.push({
+                    angle: angle,
+                    life: 1.0
+                });
+                updateHUD();
+
+                if (this.shield <= 0) {
+                    gameState = 'gameover';
+                    gameOverEl.style.display = 'block';
+                    updateUIVisibility();
+                    createShipExplosion(this.x, this.y);
+                }
+            }
+
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+
+                // Draw Shield Hits
+                this.shieldHits.forEach(hit => {
+                    ctx.save();
+                    ctx.rotate(hit.angle);
+                    ctx.beginPath();
+                    ctx.arc(0, 0, this.size * 2, -Math.PI / 4, Math.PI / 4);
+                    ctx.strokeStyle = `rgba(0, 255, 255, ${hit.life})`;
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                    ctx.fillStyle = `rgba(0, 255, 255, ${hit.life * 0.3})`;
+                    ctx.fill();
+                    ctx.restore();
+                });
+
+                ctx.rotate(this.angle);
+
+                ctx.fillStyle = 'white';
+                ctx.beginPath();
+                ctx.moveTo(this.size, 0);
+                ctx.lineTo(-this.size, -this.size / 1.5);
+                ctx.lineTo(-this.size / 2, 0);
+                ctx.lineTo(-this.size, this.size / 1.5);
+                ctx.closePath();
+                ctx.fill();
+
+                ctx.restore();
+            }
+        }
+
+        class Asteroid {
+            constructor(x, y, size) {
+                if (x === undefined) this.reset();
+                else {
+                    this.x = x;
+                    this.y = y;
+                    this.size = size;
+                    this.initProperties();
+                }
+            }
+
+            reset() {
+                this.x = Math.random() * width;
+                this.y = Math.random() * height;
+                this.size = Math.random() * 30 + 20;
+
+                if (ship) {
+                    const dx = this.x - ship.x;
+                    const dy = this.y - ship.y;
+                    if (Math.sqrt(dx * dx + dy * dy) < 150) {
+                        this.reset();
+                        return;
+                    }
+                }
+
+                this.initProperties();
+            }
+
+            initProperties() {
+                this.angle = Math.random() * Math.PI * 2;
+                this.rotationSpeed = (Math.random() - 0.5) * 0.02;
+                this.dx = (Math.random() - 0.5) * 1.5;
+                this.dy = (Math.random() - 0.5) * 1.5;
+                this.mass = this.size;
+
+                this.points = [];
+                const numPoints = Math.floor(Math.random() * 5) + 5;
+                for (let i = 0; i < numPoints; i++) {
+                    const angle = (i / numPoints) * Math.PI * 2;
+                    const radius = this.size * (0.6 + Math.random() * 0.4);
+                    this.points.push({
+                        x: Math.cos(angle) * radius,
+                        y: Math.sin(angle) * radius
+                    });
+                }
+            }
+
+            update(dt) {
+                this.angle += this.rotationSpeed * dt;
+                this.x += this.dx * dt;
+                this.y += this.dy * dt;
+
+                if (this.x < this.size) { this.x = this.size; this.dx *= -1; }
+                if (this.x > width - this.size) { this.x = width - this.size; this.dx *= -1; }
+                if (this.y < this.size) { this.y = this.size; this.dy *= -1; }
+                if (this.y > height - this.size) { this.y = height - this.size; this.dy *= -1; }
+            }
+
+            draw() {
+                ctx.save();
+                ctx.translate(this.x, this.y);
+                ctx.rotate(this.angle);
+
+                ctx.fillStyle = '#555';
+                ctx.strokeStyle = '#777';
+                ctx.lineWidth = 2;
+
+                ctx.beginPath();
+                ctx.moveTo(this.points[0].x, this.points[0].y);
+                for (let i = 1; i < this.points.length; i++) {
+                    ctx.lineTo(this.points[i].x, this.points[i].y);
+                }
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.restore();
+            }
+        }
+
+        class Comet {
+            constructor() {
+                this.reset();
+            }
+
+            reset() {
+                // Spawn from top or bottom
+                const fromTop = Math.random() < 0.5;
+                this.y = fromTop ? -20 : height + 20;
+                this.x = Math.random() * width;
+
+                // Target opposite side with some randomness
+                const targetY = fromTop ? height + 50 : -50;
+                const targetX = Math.random() * width;
+
+                const angle = Math.atan2(targetY - this.y, targetX - this.x);
+                const speed = Math.random() * 3 + 5; // Faster: 5-8
+
+                this.vx = Math.cos(angle) * speed;
+                this.vy = Math.sin(angle) * speed;
+
+                this.size = 15;
+                this.trail = [];
+                // this.smoke = []; // Use global
+                this.life = 1.0;
+                this.pulse = 0;
+            }
+
+            update(dt) {
+                this.x += this.vx * dt;
+                this.y += this.vy * dt;
+                this.pulse += 0.2 * dt;
+
+                // Add fire trail particles
+                this.trail.push({ x: this.x, y: this.y, life: 1.0, size: this.size });
+
+                // Add smoke particles
+                // Emit opposite to velocity with spread
+                const angle = Math.atan2(this.vy, this.vx) + Math.PI;
+
+                // Calculate tail position (behind the head)
+                const tailX = this.x + Math.cos(angle) * this.size * 4;
+                const tailY = this.y + Math.sin(angle) * this.size * 4;
+
+                const spread = (Math.random() - 0.5) * 0.5;
+                const smokeSpeed = Math.random() * 2 + 1;
+                cometSmokeParticles.push({
+                    x: tailX,
+                    y: tailY,
+                    vx: Math.cos(angle + spread) * smokeSpeed,
+                    vy: Math.sin(angle + spread) * smokeSpeed,
+                    life: 1.0,
+                    size: Math.random() * 5 + 3,
+                    decay: Math.random() * 0.02 + 0.01
+                });
+
+                // Update fire trail
+                for (let i = this.trail.length - 1; i >= 0; i--) {
+                    this.trail[i].life -= 0.08 * dt; // Fade faster
+                    this.trail[i].size *= Math.pow(0.9, dt);
+                    if (this.trail[i].life <= 0) {
+                        this.trail.splice(i, 1);
+                    }
+                }
+
+                // Smoke updated globally now
+
+                // Check if off screen (far enough to be gone)
+                if (this.y < -100 || this.y > height + 100 || this.x < -100 || this.x > width + 100) {
+                    this.life = 0; // Mark for removal
+                }
+            }
+
+            draw() {
+                ctx.save();
+
+                // Smoke drawn globally
+
+                // Draw fire trail
+                this.trail.forEach(p => {
+                    ctx.fillStyle = `rgba(255, ${Math.floor(p.life * 200)}, 0, ${p.life})`;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                    ctx.fill();
+                });
+
+                // Draw head with pulsing
+                ctx.translate(this.x, this.y);
+                const pulseScale = 1 + Math.sin(this.pulse) * 0.1;
+                const currentSize = this.size * pulseScale;
+
+                const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, currentSize);
+                gradient.addColorStop(0, 'white');
+                gradient.addColorStop(0.2, 'yellow');
+                gradient.addColorStop(0.5, 'orange');
+                gradient.addColorStop(1, 'rgba(255, 0, 0, 0)');
+
+                ctx.fillStyle = gradient;
+                ctx.beginPath();
+                ctx.arc(0, 0, currentSize * 1.5, 0, Math.PI * 2); // Larger glow
+                ctx.fill();
+
+                // Solid core
+                ctx.fillStyle = 'white';
+                ctx.beginPath();
+                ctx.arc(0, 0, this.size * 0.4, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.restore();
+            }
+        }
+
+        function shootMissile() {
+            if (!ship) return;
+            const noseX = ship.x + Math.cos(ship.angle) * ship.size;
+            const noseY = ship.y + Math.sin(ship.angle) * ship.size;
+            missiles.push(new Missile(noseX, noseY, ship.angle));
+            stats.missilesFired++;
+            updateHUD();
+        }
+
+        function createExplosion(x, y, color) {
+            const numParticles = 15;
+            for (let i = 0; i < numParticles; i++) {
+                particles.push(new Particle(x, y, color));
+            }
+        }
+
+        function createShipExplosion(x, y) {
+            // Fire/Smoke
+            createExplosion(x, y, '255, 100, 50');
+            createExplosion(x, y, '200, 200, 200');
+
+            // Debris
+            const numDebris = 10;
+            for (let i = 0; i < numDebris; i++) {
+                debrisParticles.push(new Debris(x, y));
+            }
+        }
+
+        function createRingExplosion(x, y) {
+            explosionRings.push(new ExplosionRing(x, y));
+        }
+
+        function createDust(x, y) {
+            const numParticles = 10;
+            for (let i = 0; i < numParticles; i++) {
+                particles.push(new Particle(x, y, '150, 150, 150'));
+            }
+        }
+
+        function checkCollisions() {
+            // Asteroid vs Asteroid
+            for (let i = 0; i < asteroids.length; i++) {
+                for (let j = i + 1; j < asteroids.length; j++) {
+                    const a1 = asteroids[i];
+                    const a2 = asteroids[j];
+
+                    const dx = a2.x - a1.x;
+                    const dy = a2.y - a1.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    const minDist = a1.size + a2.size;
+
+                    if (distance < minDist) {
+                        const collisionX = (a1.x * a2.size + a2.x * a1.size) / (a1.size + a2.size);
+                        const collisionY = (a1.y * a2.size + a2.y * a1.size) / (a1.size + a2.size);
+                        createExplosion(collisionX, collisionY);
+
+                        const angle = Math.atan2(dy, dx);
+                        const overlap = minDist - distance;
+
+                        const moveX = Math.cos(angle) * overlap * 0.5;
+                        const moveY = Math.sin(angle) * overlap * 0.5;
+
+                        a1.x -= moveX;
+                        a1.y -= moveY;
+                        a2.x += moveX;
+                        a2.y += moveY;
+
+                        const nx = Math.cos(angle);
+                        const ny = Math.sin(angle);
+
+                        const v1n = a1.dx * nx + a1.dy * ny;
+                        const v2n = a2.dx * nx + a2.dy * ny;
+
+                        const m1 = a1.mass;
+                        const m2 = a2.mass;
+
+                        const v1nFinal = (v1n * (m1 - m2) + 2 * m2 * v2n) / (m1 + m2);
+                        const v2nFinal = (v2n * (m2 - m1) + 2 * m1 * v1n) / (m1 + m2);
+
+                        a1.dx -= (v1n - v1nFinal) * nx;
+                        a1.dy -= (v1n - v1nFinal) * ny;
+                        a2.dx -= (v2n - v2nFinal) * nx;
+                        a2.dy -= (v2n - v2nFinal) * ny;
+                    }
+                }
+            }
+
+            // Missile vs Asteroid
+            for (let i = missiles.length - 1; i >= 0; i--) {
+                const m = missiles[i];
+                let hit = false;
+                for (let j = asteroids.length - 1; j >= 0; j--) {
+                    const a = asteroids[j];
+                    const dx = m.x - a.x;
+                    const dy = m.y - a.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    if (distance < a.size) {
+                        hit = true;
+                        createExplosion(m.x, m.y, '255, 100, 100');
+                        stats.asteroidsHit++;
+
+                        if (a.size > MIN_ASTEROID_SIZE) {
+                            const newSize = a.size * 0.6;
+                            asteroids.push(new Asteroid(a.x, a.y, newSize));
+                            asteroids.push(new Asteroid(a.x, a.y, newSize));
+                        } else {
+                            createDust(a.x, a.y);
+                        }
+
+                        asteroids.splice(j, 1);
+                        updateHUD(); // Update count
+
+                        if (asteroids.length === 0) {
+                            gameState = 'won';
+                            winEl.style.display = 'block';
+                            updateUIVisibility();
+                        }
+                        break;
+                    }
+                }
+                if (hit) {
+                    missiles.splice(i, 1);
+                }
+            }
+
+            // Ship vs Asteroid
+            if (ship && gameState === 'playing') {
+                for (let i = 0; i < asteroids.length; i++) {
+                    const a = asteroids[i];
+                    const dx = ship.x - a.x;
+                    const dy = ship.y - a.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    const minDist = ship.size + a.size;
+
+                    if (distance < minDist) {
+                        const angle = Math.atan2(dy, dx);
+                        const overlap = minDist - distance;
+                        ship.x += Math.cos(angle) * overlap;
+                        ship.y += Math.sin(angle) * overlap;
+
+                        ship.vx += Math.cos(angle) * 2;
+                        ship.vy += Math.sin(angle) * 2;
+
+                        ship.hit(Math.atan2(-dy, -dx));
+
+                        a.dx -= Math.cos(angle) * 1;
+                        a.dy -= Math.sin(angle) * 1;
+                    }
+                }
+
+                // Ship vs Comet
+                for (let i = 0; i < comets.length; i++) {
+                    const c = comets[i];
+                    const dx = ship.x - c.x;
+                    const dy = ship.y - c.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+                    const minDist = ship.size + c.size;
+
+                    if (distance < minDist) {
+                        // 2x damage (20 shield)
+                        ship.shield -= 20;
+                        if (ship.shield < 0) ship.shield = 0;
+                        ship.shieldHits.push({
+                            angle: Math.atan2(-dy, -dx),
+                            life: 1.0
+                        });
+                        updateHUD();
+
+                        if (ship.shield <= 0) {
+                            gameState = 'gameover';
+                            gameOverEl.style.display = 'block';
+                            updateUIVisibility();
+                            createShipExplosion(ship.x, ship.y);
+                        }
+
+                        // Explode comet
+                        createExplosion(c.x, c.y, '255, 50, 0');
+                        createRingExplosion(c.x, c.y);
+                        comets.splice(i, 1);
+                        i--;
+                    }
+                }
+            }
+
+            // Missile vs Comet
+            for (let i = missiles.length - 1; i >= 0; i--) {
+                const m = missiles[i];
+                let hit = false;
+                for (let j = comets.length - 1; j >= 0; j--) {
+                    const c = comets[j];
+                    const dx = m.x - c.x;
+                    const dy = m.y - c.y;
+                    const distance = Math.sqrt(dx * dx + dy * dy);
+
+                    if (distance < c.size) {
+                        hit = true;
+                        createExplosion(c.x, c.y, '255, 100, 50');
+                        createRingExplosion(c.x, c.y);
+                        comets.splice(j, 1);
+                        break;
+                    }
+                }
+                if (hit) {
+                    missiles.splice(i, 1);
+                }
+            }
+        }
+
+        function calculateTotalAsteroids() {
+            let total = 0;
+            asteroids.forEach(a => {
+                total += getLeafCount(a.size);
+            });
+            return total;
+        }
+
+        function getLeafCount(size) {
+            // If asteroid is small enough to evaporate, it counts as 1 (itself)
+            // Actually, the user said "if it has to be split in two... it counts as 2"
+            // This implies we are counting the final destructible entities.
+            // If current size <= MIN, it is 1 entity to destroy.
+            // If current size > MIN, it becomes 2 entities.
+
+            if (size <= MIN_ASTEROID_SIZE) {
+                return 1;
+            } else {
+                // It will split into 2 smaller ones
+                // Check if the smaller ones are leaves
+                const nextSize = size * 0.6;
+                if (nextSize <= MIN_ASTEROID_SIZE) {
+                    // Splits into 2 leaves
+                    return 2;
+                } else {
+                    // Splits into 2 non-leaves (or mixed), recurse
+                    return 2 * getLeafCount(nextSize);
+                }
+            }
+        }
+
+        function initStars() {
+            stars = [];
+            for (let i = 0; i < numStars; i++) {
+                stars.push(new Star());
+            }
+        }
+
+        function initAsteroids() {
+            asteroids = [];
+            for (let i = 0; i < numAsteroids; i++) {
+                asteroids.push(new Asteroid());
+            }
+            initialTotalMass = calculateTotalMass();
+        }
+
+        let lastTime = 0;
+        function animate(timestamp) {
+            if (!lastTime) lastTime = timestamp;
+            const deltaTime = timestamp - lastTime;
+            lastTime = timestamp;
+            // Target 60 FPS (16.67ms per frame)
+            // dt = 1.0 means 1 frame at 60fps
+            const dt = deltaTime / (1000 / 60);
+
+            ctx.fillStyle = 'black';
+            ctx.fillRect(0, 0, width, height);
+
+            stars.forEach(star => {
+                star.update(dt);
+                star.draw();
+            });
+
+            if (gameState === 'playing') {
+                checkCollisions();
+            } else if (gameState === 'won') {
+                // Random fireworks
+                if (Math.random() < 0.05 * dt) {
+                    const x = Math.random() * width;
+                    const y = Math.random() * height;
+                    const color = `${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}, ${Math.floor(Math.random() * 255)}`;
+                    createExplosion(x, y, color);
+                    createRingExplosion(x, y);
+                }
+            }
+
+            asteroids.forEach(asteroid => {
+                asteroid.update(dt);
+                asteroid.draw();
+            });
+
+            // Spawn Comets
+            if (gameState === 'playing') {
+                cometSpawnTimer += dt;
+                if (cometSpawnTimer > COMET_SPAWN_INTERVAL) {
+                    comets.push(new Comet());
+                    cometSpawnTimer = 0;
+                }
+            }
+
+            comets.forEach((comet, index) => {
+                comet.update(dt);
+                comet.draw();
+                if (comet.life <= 0) {
+                    comets.splice(index, 1);
+                }
+            });
+
+            if (ship && gameState === 'playing') {
+                ship.update(dt);
+                ship.draw();
+            }
+
+            // Update and draw missiles
+            for (let i = missiles.length - 1; i >= 0; i--) {
+                const m = missiles[i];
+                m.update(dt);
+                m.draw();
+                if (m.life <= 0) {
+                    createRingExplosion(m.x, m.y);
+                    missiles.splice(i, 1);
+                }
+            }
+
+            // Update and draw particles
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.update(dt);
+                p.draw();
+                if (p.life <= 0) {
+                    particles.splice(i, 1);
+                }
+            }
+
+            // Update and draw exhaust particles
+            for (let i = exhaustParticles.length - 1; i >= 0; i--) {
+                const p = exhaustParticles[i];
+                p.update(dt);
+                p.draw();
+                if (p.life <= 0) {
+                    exhaustParticles.splice(i, 1);
+                }
+            }
+
+            // Update and draw comet smoke particles
+            for (let i = cometSmokeParticles.length - 1; i >= 0; i--) {
+                const p = cometSmokeParticles[i];
+                p.x += p.vx * dt;
+                p.y += p.vy * dt;
+                p.life -= p.decay * dt;
+                p.size += 0.1 * dt;
+
+                ctx.fillStyle = `rgba(100, 100, 100, ${p.life * 0.5})`;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+
+                if (p.life <= 0) {
+                    cometSmokeParticles.splice(i, 1);
+                }
+            }
+
+            // Update and draw debris particles
+            for (let i = debrisParticles.length - 1; i >= 0; i--) {
+                const p = debrisParticles[i];
+                p.update(dt);
+                p.draw();
+                if (p.life <= 0) {
+                    debrisParticles.splice(i, 1);
+                }
+            }
+
+            // Update and draw explosion rings
+            for (let i = explosionRings.length - 1; i >= 0; i--) {
+                const r = explosionRings[i];
+                r.update(dt);
+                r.draw();
+                if (r.alpha <= 0) {
+                    explosionRings.splice(i, 1);
+                }
+            }
+
+            requestAnimationFrame(animate);
+        }
+
+        window.addEventListener('resize', resize);
+        resize();
+        // Initial state is welcome, so don't resetGame immediately to playing
+        // Just init stars
+        initStars();
+        updateUIVisibility();
+        requestAnimationFrame(animate);
+    </script>
+</body>
+
+</html>
