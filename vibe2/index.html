@@ -1,0 +1,1160 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Space Escape</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="ui-layer">
+        <div class="hud-panel">
+            <div id="distance-display">Dist: 0</div>
+        </div>
+    </div>
+
+    <div id="message-overlay" class="visible">
+        <h1 id="msg-title">Space Escape</h1>
+        <p id="msg-body"><!--to be replaced--></p>
+        <button id="start-btn">Start</button>
+        <button id="seed-btn"
+            style="margin-left: 10px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3);">Level</button>
+        <button id="fs-btn"
+            style="margin-left: 10px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3);">Full
+            Screen</button>
+    </div>
+
+    <!-- Mobile Controls -->
+    <div id="controls">
+        <div class="control-group">
+            <div id="joystickContainer">
+                <div id="joystickKnob"></div>
+            </div>
+        </div>
+        <div class="control-group">
+            <div class="control-btn" id="btnThrust">↑</div>
+        </div>
+    </div>
+
+    <script>
+        // --- Constants & Config ---
+        const GRAVITY = 0.05;
+        const THRUST_POWER = 0.15;
+        const ROTATION_SPEED = 0.05;
+        const DRAG = 0.995; // Air resistance
+        const SAFE_LANDING_SPEED = 1.5;
+        const SAFE_LANDING_ANGLE = 0.2; // Radians deviation from vertical
+        const PARTICLE_LIFETIME = 60;
+
+        const GAME_STATUS = {
+            START: 'start',
+            PLAYING: 'playing',
+            CRASHED: 'crashed',
+            WIN: 'win'
+        };
+
+        // --- Game State ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        let width, height;
+        let animationId;
+        let lastTime = 0;
+
+        const keys = {
+            ArrowUp: false,
+            ArrowLeft: false,
+            ArrowRight: false,
+            KeyW: false,
+            KeyA: false,
+            KeyD: false
+        };
+
+        const gameState = {
+            status: GAME_STATUS.START,
+            camera: { x: 0, y: 0, zoom: 1 },
+            particles: [],
+            mines: []
+        };
+
+        const ship = {
+            x: 0,
+            y: 0,
+            vx: 0,
+            vy: 0,
+            angle: -Math.PI / 2, // Pointing up
+            radius: 10,
+            color: 'black',
+            landed: true
+        };
+
+        // --- Terrain Generation ---
+        // We'll generate a "tunnel" using a series of points for ceiling and floor
+        const terrain = {
+            segments: [],
+            grid2D: {},
+            cellSize: 300,
+            endZone: null
+        };
+
+        function resize() {
+            width = window.innerWidth;
+            height = window.innerHeight;
+            canvas.width = width;
+            canvas.height = height;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // --- Input Handling ---
+        window.addEventListener('keydown', (e) => {
+            if (keys.hasOwnProperty(e.code)) keys[e.code] = true;
+            if (e.code === 'Enter') {
+                if (gameState.status !== GAME_STATUS.PLAYING) {
+                    resetGame();
+                }
+            }
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (keys.hasOwnProperty(e.code)) keys[e.code] = false;
+        });
+
+        document.getElementById('start-btn').addEventListener('click', () => {
+            if (gameState.status !== GAME_STATUS.PLAYING) {
+                resetGame();
+            }
+        });
+
+        // Set initial controls message based on device type
+        const updateControlsText = () => {
+            const isTouch = window.matchMedia('(pointer: coarse)').matches;
+            const msgBody = document.getElementById('msg-body');
+            if (msgBody && gameState.status === GAME_STATUS.START) {
+                msgBody.innerText = isTouch ? 'Controls: Joystick & Thrust button' : 'Controls: ←↑→ or WAD';
+            }
+        };
+        updateControlsText();
+        window.matchMedia('(pointer: coarse)').addEventListener('change', updateControlsText);
+
+        document.getElementById('fs-btn').addEventListener('click', () => {
+            if (!document.fullscreenElement) {
+                document.documentElement.requestFullscreen().catch(err => {
+                    console.log(`Error attempting to enable full-screen mode: ${err.message} (${err.name})`);
+                });
+            } else {
+                document.exitFullscreen();
+            }
+        });
+
+        document.getElementById('seed-btn').addEventListener('click', () => {
+            const currentSeed = getUrlParams().seed;
+            const newSeed = prompt('Enter a level seed (number):', currentSeed);
+            if (newSeed !== null && newSeed !== '') {
+                const url = new URL(window.location.href);
+                url.searchParams.set('seed', newSeed);
+                window.history.pushState({}, '', url);
+                resetGame();
+            }
+        });
+
+        // --- Mobile Controls Logic ---
+        let joystickActive = false;
+        let joystickHasMoved = false;
+        let joystickAngle = 0;
+        let joystickCenter = { x: 0, y: 0 };
+        const maxRadius = 35;
+
+        const btnThrust = document.getElementById('btnThrust');
+        const joystickContainer = document.getElementById('joystickContainer');
+        const joystickKnob = document.getElementById('joystickKnob');
+
+        function setupTouchControl(elem, code, onStart) {
+            const handleStart = (e) => {
+                e.preventDefault();
+                if (onStart) {
+                    if (onStart()) return;
+                }
+                keys[code] = true;
+                elem.classList.add('active');
+            };
+            const handleEnd = (e) => {
+                e.preventDefault();
+                keys[code] = false;
+                elem.classList.remove('active');
+            };
+
+            elem.addEventListener('touchstart', handleStart, { passive: false });
+            elem.addEventListener('touchend', handleEnd, { passive: false });
+            elem.addEventListener('mousedown', handleStart);
+            elem.addEventListener('mouseup', handleEnd);
+            elem.addEventListener('mouseleave', handleEnd);
+        }
+
+        if (btnThrust) {
+            setupTouchControl(btnThrust, 'ArrowUp', () => {
+                if (gameState.status !== GAME_STATUS.PLAYING) {
+                    resetGame();
+                    return true;
+                }
+                return false;
+            });
+        }
+
+        function handleJoystickStart(e) {
+            e.preventDefault();
+            joystickActive = true;
+            joystickHasMoved = false;
+
+            let clientX, clientY;
+            if (e.touches) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            } else {
+                clientX = e.clientX;
+                clientY = e.clientY;
+            }
+
+            joystickCenter = {
+                x: clientX,
+                y: clientY
+            };
+            // Don't call move yet to establish neutral start
+        }
+
+        function handleJoystickMove(e) {
+            if (!joystickActive) return;
+            e.preventDefault();
+
+            let clientX, clientY;
+            if (e.touches) {
+                clientX = e.touches[0].clientX;
+                clientY = e.touches[0].clientY;
+            } else {
+                clientX = e.clientX;
+                clientY = e.clientY;
+            }
+
+            let deltaX = clientX - joystickCenter.x;
+            let deltaY = clientY - joystickCenter.y;
+
+            const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
+
+            // Visual update
+            let visualDeltaX = deltaX;
+            let visualDeltaY = deltaY;
+
+            if (distance > maxRadius) {
+                const ratio = maxRadius / distance;
+                visualDeltaX *= ratio;
+                visualDeltaY *= ratio;
+            }
+
+            joystickKnob.style.transform = `translate(calc(-50% + ${visualDeltaX}px), calc(-50% + ${visualDeltaY}px))`;
+
+            joystickHasMoved = true;
+            joystickAngle = Math.atan2(deltaY, deltaX);
+        }
+
+        function handleJoystickEnd(e) {
+            e.preventDefault();
+            joystickActive = false;
+            joystickHasMoved = false;
+            joystickKnob.style.transform = `translate(-50%, -50%)`;
+        }
+
+        if (joystickContainer) {
+            joystickContainer.addEventListener('touchstart', handleJoystickStart, { passive: false });
+            joystickContainer.addEventListener('touchmove', handleJoystickMove, { passive: false });
+            joystickContainer.addEventListener('touchend', handleJoystickEnd, { passive: false });
+            joystickContainer.addEventListener('mousedown', handleJoystickStart);
+            window.addEventListener('mousemove', handleJoystickMove);
+            window.addEventListener('mouseup', handleJoystickEnd);
+        }
+
+        // --- Core Logic ---
+
+        // Simple Seeded RNG
+        let seed = 12345;
+        function seededRandom() {
+            const x = Math.sin(seed++) * 10000;
+            return x - Math.floor(x);
+        }
+
+        function getUrlParams() {
+            const params = new URLSearchParams(window.location.search);
+            return {
+                length: parseInt(params.get('length') ?? 100),
+                seed: parseInt(params.get('seed') ?? Math.floor(Math.random() * 100)),
+                mines: parseInt(params.get('mines') ?? 10),
+                zoom: parseFloat(params.get('zoom') ?? 1.0)
+            };
+        }
+
+        function generateLevel() {
+            const params = getUrlParams();
+            seed = params.seed;
+            gameState.camera.zoom = params.zoom;
+
+            // Update Level button text
+            const seedBtn = document.getElementById('seed-btn');
+            if (seedBtn) seedBtn.innerText = `Seed: ${seed}`;
+
+            // Ensure params are in URL
+            const url = new URL(window.location.href);
+            let updated = false;
+            if (!url.searchParams.has('seed')) {
+                url.searchParams.set('seed', seed);
+                updated = true;
+            }
+            if (updated) {
+                window.history.replaceState({}, '', url);
+            }
+
+            terrain.segments = [];
+
+            let cx = 0;
+            let cy = 0;
+            let tunnelWidth = 400;
+
+            // Start Pad & Back Wall
+            // Back wall: from ceiling height down to floor
+            let lastFloor = { x: -100, y: -tunnelWidth + 100 };
+            let lastCeiling = { x: -100, y: -tunnelWidth + 100 };
+
+            // Segment 1: Back wall floor (Vertical)
+            let nextFloor = { x: -100, y: 100 };
+            terrain.segments.push({
+                p1: { ...lastFloor },
+                p2: { ...nextFloor },
+                color: '#06b6d4',
+                type: 'floor'
+            });
+            lastFloor = nextFloor;
+
+            // Segment 2: Start Pad
+            nextFloor = { x: 100, y: 100 };
+            terrain.segments.push({
+                p1: { ...lastFloor },
+                p2: { ...nextFloor },
+                color: '#22c55e', // Green for pad
+                type: 'floor'
+            });
+            lastFloor = nextFloor;
+
+            // Ceiling Start
+            let nextCeiling = { x: 100, y: -tunnelWidth + 100 };
+            terrain.segments.push({
+                p1: { ...lastCeiling },
+                p2: { ...nextCeiling },
+                color: '#f472b6',
+                type: 'ceiling'
+            });
+            lastCeiling = nextCeiling;
+
+            cx = 100;
+            cy = 100;
+
+            // Procedural generation of the tunnel
+            const segments = params.length;
+            for (let i = 0; i < segments; i++) {
+                const len = 50 + seededRandom() * 100;
+                // Winding path
+                const angle = (Math.sin(i * 0.1) * 1.0) + (seededRandom() - 0.5) * 0.5;
+
+                const nx = cx + Math.cos(angle) * len;
+                const ny = cy + Math.sin(angle) * len;
+
+                // Varying tunnel width
+                const currentWidth = tunnelWidth + (seededRandom() - 0.5) * 100;
+
+                // Floor point
+                let floorP = { x: nx, y: ny };
+                // Ceiling point
+                let ceilingP = {
+                    x: nx + (seededRandom() - 0.5) * 30,
+                    y: ny - currentWidth + (seededRandom() - 0.5) * 30
+                };
+
+                // Occasionally add a landing pad
+                if (i % 10 === 0 && i > 0 && i < segments - 1) {
+                    // Add segment to start of pad
+                    terrain.segments.push({
+                        p1: { ...lastFloor },
+                        p2: { ...floorP },
+                        color: '#06b6d4',
+                        type: 'floor'
+                    });
+                    terrain.segments.push({
+                        p1: { ...lastCeiling },
+                        p2: { ...ceilingP },
+                        color: '#f472b6',
+                        type: 'ceiling'
+                    });
+
+                    lastFloor = floorP;
+                    lastCeiling = ceilingP;
+
+                    // Make the next segment flat
+                    const padLen = 100;
+                    const px = nx + padLen;
+                    const py = ny; // Flat
+
+                    let padFloor = { x: px, y: py };
+                    let padCeiling = { x: px, y: py - currentWidth };
+
+                    terrain.segments.push({
+                        p1: { ...lastFloor },
+                        p2: { ...padFloor },
+                        color: '#22c55e', // Pad color
+                        type: 'floor'
+                    });
+                    terrain.segments.push({
+                        p1: { ...lastCeiling },
+                        p2: { ...padCeiling },
+                        color: '#f472b6',
+                        type: 'ceiling'
+                    });
+
+                    lastFloor = padFloor;
+                    lastCeiling = padCeiling;
+
+                    cx = px;
+                    cy = py;
+                } else {
+                    // Normal segment
+                    terrain.segments.push({
+                        p1: { ...lastFloor },
+                        p2: { ...floorP },
+                        color: '#06b6d4',
+                        type: 'floor'
+                    });
+                    terrain.segments.push({
+                        p1: { ...lastCeiling },
+                        p2: { ...ceilingP },
+                        color: '#f472b6',
+                        type: 'ceiling'
+                    });
+
+                    lastFloor = floorP;
+                    lastCeiling = ceilingP;
+
+                    cx = nx;
+                    cy = ny;
+                }
+            }
+
+            // Build Spatial Grid
+            terrain.grid2D = {};
+            terrain.segments.forEach(seg => {
+                const minX = Math.min(seg.p1.x, seg.p2.x);
+                const maxX = Math.max(seg.p1.x, seg.p2.x);
+                const startX = Math.floor(minX / terrain.cellSize);
+                const endX = Math.floor(maxX / terrain.cellSize);
+
+                // 2D Grid (for collision detection)
+                const minY = Math.min(seg.p1.y, seg.p2.y);
+                const maxY = Math.max(seg.p1.y, seg.p2.y);
+                const startY = Math.floor(minY / terrain.cellSize);
+                const endY = Math.floor(maxY / terrain.cellSize);
+
+                for (let x = startX; x <= endX; x++) {
+                    for (let y = startY; y <= endY; y++) {
+                        const key = `${x},${y}`;
+                        if (!terrain.grid2D[key]) terrain.grid2D[key] = [];
+                        terrain.grid2D[key].push(seg);
+                    }
+                }
+            });
+
+            // End Zone (Line connecting last ceiling and floor points)
+            terrain.finishLine = { p1: lastFloor, p2: lastCeiling };
+
+            // Generate Mines
+            gameState.mines = [];
+            const mineCount = params.mines;
+
+            for (let i = 0; i < mineCount; i++) {
+                // Pick a random segment (avoiding start area)
+                // Start area is roughly first 5 segments
+                const segIndex = Math.floor(5 + seededRandom() * (segments - 6));
+
+                // We need to find segments corresponding to index i.
+                const floorSeg = terrain.segments[segIndex * 2];
+                const ceilingSeg = terrain.segments[segIndex * 2 + 1];
+
+                if (floorSeg && ceilingSeg) {
+                    const midX = (floorSeg.p1.x + floorSeg.p2.x) / 2;
+                    const floorY = (floorSeg.p1.y + floorSeg.p2.y) / 2;
+                    const ceilingY = (ceilingSeg.p1.y + ceilingSeg.p2.y) / 2;
+
+                    const midY = (floorY + ceilingY) / 2;
+                    const height = Math.abs(floorY - ceilingY);
+
+                    if (height > 100) {
+                        gameState.mines.push({
+                            x: midX + (seededRandom() - 0.5) * 50,
+                            y: midY + (seededRandom() - 0.5) * (height * 0.4),
+                            vx: 0,
+                            vy: 0,
+                            radius: 12,
+                            state: 'idle',
+                            active: true, // For single explosion check
+                            type: seededRandom() > 0.3 ? 'seeker' : 'gravity'
+                        });
+                    }
+                }
+            }
+        }
+
+        function resetGame() {
+            generateLevel();
+
+            // Spawn ship at start pad
+            ship.x = 0;
+            ship.y = 89; // Landed position (100 - 11)
+            ship.vx = 0;
+            ship.vy = 0;
+            ship.angle = -Math.PI / 2;
+            ship.landed = true;
+
+            gameState.status = GAME_STATUS.PLAYING;
+            gameState.particles = [];
+
+            document.getElementById('message-overlay').classList.remove('visible');
+
+            if (!animationId) {
+                lastTime = performance.now();
+                animationId = requestAnimationFrame(loop);
+            }
+        }
+
+        function createExplosion(x, y) {
+            for (let i = 0; i < 60; i++) {
+                gameState.particles.push({
+                    x: x,
+                    y: y,
+                    vx: (Math.random() - 0.5) * 15,
+                    vy: (Math.random() - 0.5) * 15,
+                    life: 1.0 + Math.random() * 0.5,
+                    decay: 0.02,
+                    size: 3,
+                    color: `hsl(${Math.random() * 60}, 100%, 50%)`, // Fire colors
+                    type: 'explosion'
+                });
+            }
+        }
+
+        function createThrustParticles() {
+            // Emit from tip of the flame
+            // Flame length is roughly 15-20px behind the ship center
+            const flameLen = 25;
+            const tipX = ship.x - Math.cos(ship.angle) * flameLen;
+            const tipY = ship.y - Math.sin(ship.angle) * flameLen;
+
+            // Smoke - Generate more particles
+            for (let i = 0; i < 2; i++) {
+                gameState.particles.push({
+                    x: tipX + (Math.random() - 0.5) * 5, // Slight spread at source
+                    y: tipY + (Math.random() - 0.5) * 5,
+                    vx: (Math.random() - 0.5) * 2,
+                    vy: (Math.random() - 0.5) * 2,
+                    life: 1.0,
+                    decay: 0.01 + Math.random() * 0.02, // Vary decay slightly
+                    size: 1 + Math.random() * 2, // Smaller start size
+                    color: `rgba(150, 150, 150, 0.4)`,
+                    type: 'smoke'
+                });
+            }
+        }
+
+        function updatePhysics(dt) {
+            if (gameState.status !== GAME_STATUS.PLAYING) return;
+
+            // Controls
+            const thrusting = keys.ArrowUp || keys.KeyW;
+
+            if (thrusting) {
+                ship.landed = false;
+            }
+
+            if (ship.landed) return;
+
+            if (joystickActive && joystickHasMoved) {
+                // Immediate rotation to joystick angle
+                ship.angle = joystickAngle;
+            } else {
+                const rotatingLeft = keys.ArrowLeft || keys.KeyA;
+                const rotatingRight = keys.ArrowRight || keys.KeyD;
+                if (rotatingLeft) ship.angle -= ROTATION_SPEED * dt;
+                if (rotatingRight) ship.angle += ROTATION_SPEED * dt;
+            }
+
+            if (thrusting) {
+                ship.vx += Math.cos(ship.angle) * THRUST_POWER * dt;
+                ship.vy += Math.sin(ship.angle) * THRUST_POWER * dt;
+                createThrustParticles();
+            }
+
+            // Gravity
+            ship.vy += GRAVITY * dt;
+
+            // Drag
+            ship.vx *= Math.pow(DRAG, dt);
+            ship.vy *= Math.pow(DRAG, dt);
+
+            // Apply velocity
+            ship.x += ship.vx * dt;
+            ship.y += ship.vy * dt;
+
+            // Collision Detection
+            checkCollisions();
+
+            // Win condition: Cross the finish line
+            if (checkLineIntersection(
+                { x: ship.x, y: ship.y },
+                { x: ship.x + ship.vx * dt, y: ship.y + ship.vy * dt },
+                terrain.finishLine.p1,
+                terrain.finishLine.p2
+            )) {
+                gameState.status = GAME_STATUS.WIN;
+                showGameOver('Success!', 'You have escaped to space!');
+            }
+        }
+
+        function checkLineIntersection(p1, p2, p3, p4) {
+            // Check if line segment p1-p2 intersects p3-p4
+            const denominator = (p4.y - p3.y) * (p2.x - p1.x) - (p4.x - p3.x) * (p2.y - p1.y);
+            if (denominator === 0) return false;
+
+            const ua = ((p4.x - p3.x) * (p1.y - p3.y) - (p4.y - p3.y) * (p1.x - p3.x)) / denominator;
+            const ub = ((p2.x - p1.x) * (p1.y - p3.y) - (p2.y - p1.y) * (p1.x - p3.x)) / denominator;
+
+            return (ua >= 0 && ua <= 1) && (ub >= 0 && ub <= 1);
+        }
+
+        function checkCollisions() {
+            // Ship points (triangle)
+            const nose = {
+                x: ship.x + Math.cos(ship.angle) * 15,
+                y: ship.y + Math.sin(ship.angle) * 15
+            };
+            const leftWing = {
+                x: ship.x + Math.cos(ship.angle + 2.6) * 10,
+                y: ship.y + Math.sin(ship.angle + 2.6) * 10
+            };
+            const rightWing = {
+                x: ship.x + Math.cos(ship.angle - 2.6) * 10,
+                y: ship.y + Math.sin(ship.angle - 2.6) * 10
+            };
+
+            const shipLines = [
+                [nose, leftWing],
+                [leftWing, rightWing],
+                [rightWing, nose]
+            ];
+
+            // Determine relevant grid buckets
+            // Ship radius is roughly 15, so check a bit wider
+            const margin = 20;
+            const startX = Math.floor((ship.x - margin) / terrain.cellSize);
+            const endX = Math.floor((ship.x + margin) / terrain.cellSize);
+            const startY = Math.floor((ship.y - margin) / terrain.cellSize);
+            const endY = Math.floor((ship.y + margin) / terrain.cellSize);
+
+            const checkedSegments = new Set();
+
+            for (let x = startX; x <= endX; x++) {
+                for (let y = startY; y <= endY; y++) {
+                    const key = `${x},${y}`;
+                    const bucket = terrain.grid2D[key];
+                    if (!bucket) continue;
+
+                    for (let segment of bucket) {
+                        if (checkedSegments.has(segment)) continue;
+                        checkedSegments.add(segment);
+
+                        for (let sl of shipLines) {
+                            if (checkLineIntersection(sl[0], sl[1], segment.p1, segment.p2)) {
+                                if (segment.type === 'floor') {
+                                    handleCollision(segment.p1, segment.p2);
+                                } else {
+                                    crash();
+                                }
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        function handleCollision(groundP1, groundP2) {
+            // Check if it's a safe landing
+            // 1. Is the surface flat? (y is same)
+            const isFlat = Math.abs(groundP1.y - groundP2.y) < 1;
+
+            // 2. Is speed low enough?
+            const speed = Math.sqrt(ship.vx * ship.vx + ship.vy * ship.vy);
+
+            // 3. Is angle correct? (Upright)
+            // Ship angle is -PI/2 when upright.
+            // Normalize angle to -PI to PI
+            let angle = ship.angle;
+            while (angle <= -Math.PI) angle += Math.PI * 2;
+            while (angle > Math.PI) angle -= Math.PI * 2;
+
+            const isUpright = Math.abs(angle + Math.PI / 2) < SAFE_LANDING_ANGLE;
+
+            if (isFlat && speed < SAFE_LANDING_SPEED && isUpright) {
+                // Landed
+                // Stop ship
+                ship.landed = true;
+                ship.vx = 0;
+                ship.vy = 0;
+                ship.angle = -Math.PI / 2; // Snap to upright
+                // Align to surface
+                // Ship height (wings) is 10px from center. 
+                // We place it slightly higher (-11) to avoid immediate collision loop
+                ship.y = groundP1.y - 11;
+            } else {
+                crash();
+            }
+        }
+
+        function crash() {
+            gameState.status = GAME_STATUS.CRASHED;
+            createExplosion(ship.x, ship.y);
+            showGameOver('Failure!', 'Your ship is no longer usable.');
+        }
+
+        function showGameOver(title, msg) {
+            document.getElementById('msg-title').innerText = title;
+            document.getElementById('msg-body').innerText = msg;
+            document.getElementById('start-btn').innerText = 'Retry';
+            document.getElementById('message-overlay').classList.add('visible');
+        }
+
+        function getTerrainAt(x, y) {
+            let floorY = null;
+            let ceilingY = null;
+
+            const kx = Math.floor(x / terrain.cellSize);
+            const ky = Math.floor(y / terrain.cellSize);
+
+            // Check current and adjacent vertical buckets to handle boundary cases
+            for (let offset = -1; offset <= 1; offset++) {
+                const key = `${kx},${ky + offset}`;
+                const bucket = terrain.grid2D[key];
+
+                if (bucket) {
+                    for (let seg of bucket) {
+                        const minX = Math.min(seg.p1.x, seg.p2.x);
+                        const maxX = Math.max(seg.p1.x, seg.p2.x);
+
+                        // Ignore vertical segments for Y lookup
+                        if (maxX - minX < 0.1) continue;
+
+                        if (x >= minX && x <= maxX) {
+                            const t = (x - seg.p1.x) / (seg.p2.x - seg.p1.x);
+                            const val = seg.p1.y + t * (seg.p2.y - seg.p1.y);
+
+                            if (seg.type === 'floor') {
+                                floorY = val;
+                            } else if (seg.type === 'ceiling') {
+                                ceilingY = val;
+                            }
+                        }
+                    }
+                }
+            }
+            return { floorY, ceilingY };
+        }
+
+        function updateMines(dt) {
+            const TRIGGER_DIST = 300;
+            const DISABLE_DIST = 500;
+            const ACCEL = 0.05;
+            const MAX_SPEED = 2.0;
+
+            // Mine-Mine Collision
+            for (let i = 0; i < gameState.mines.length; i++) {
+                for (let j = i + 1; j < gameState.mines.length; j++) {
+                    const m1 = gameState.mines[i];
+                    const m2 = gameState.mines[j];
+                    if (!m1.active || !m2.active) continue;
+
+                    const dx = m2.x - m1.x;
+                    const dy = m2.y - m1.y;
+                    const dist = Math.sqrt(dx * dx + dy * dy);
+                    const minDist = m1.radius + m2.radius;
+
+                    if (dist < minDist) {
+                        // Check if either is active (seeking ship)
+                        if (m1.state === 'active' || m2.state === 'active') {
+                            // Explode both
+                            m1.active = false;
+                            m2.active = false;
+                            createExplosion(m1.x, m1.y);
+                            createExplosion(m2.x, m2.y);
+                            continue;
+                        }
+
+                        // Resolve overlap
+                        const overlap = minDist - dist;
+                        const angle = Math.atan2(dy, dx);
+                        const moveX = Math.cos(angle) * overlap * 0.5;
+                        const moveY = Math.sin(angle) * overlap * 0.5;
+
+                        m1.x -= moveX;
+                        m1.y -= moveY;
+                        m2.x += moveX;
+                        m2.y += moveY;
+
+                        // Bounce
+                        const tx = Math.cos(angle);
+                        const ty = Math.sin(angle);
+                        const dp1 = m1.vx * tx + m1.vy * ty;
+                        const dp2 = m2.vx * tx + m2.vy * ty;
+
+                        const m1vx = tx * dp2;
+                        const m1vy = ty * dp2;
+                        const m2vx = tx * dp1;
+                        const m2vy = ty * dp1;
+
+                        m1.vx = m1vx + (m1.vx - tx * dp1);
+                        m1.vy = m1vy + (m1.vy - ty * dp1);
+                        m2.vx = m2vx + (m2.vx - tx * dp2);
+                        m2.vy = m2vy + (m2.vy - ty * dp2);
+                    }
+                }
+            }
+
+            gameState.mines.forEach(mine => {
+                if (!mine.active) return;
+
+                // Distance to ship
+                const dx = ship.x - mine.x;
+                const dy = ship.y - mine.y;
+                const dist = Math.sqrt(dx * dx + dy * dy);
+
+                // State Logic
+                if (dist < TRIGGER_DIST) {
+                    mine.state = 'active';
+                } else if (dist > DISABLE_DIST) {
+                    mine.state = 'idle';
+                }
+
+                // Movement Logic
+                if (mine.state === 'active' && gameState.status !== GAME_STATUS.CRASHED) {
+                    if (mine.type === 'seeker') {
+                        // Magnetic attraction (Mine moves to Ship)
+                        const angle = Math.atan2(dy, dx);
+                        mine.vx += Math.cos(angle) * ACCEL * dt;
+                        mine.vy += Math.sin(angle) * ACCEL * dt;
+
+                        // Cap speed
+                        const speed = Math.sqrt(mine.vx * mine.vx + mine.vy * mine.vy);
+                        if (speed > MAX_SPEED) {
+                            mine.vx = (mine.vx / speed) * MAX_SPEED;
+                            mine.vy = (mine.vy / speed) * MAX_SPEED;
+                        }
+                    } else if (mine.type === 'gravity') {
+                        // Gravity Well (Ship moves to Mine)
+                        // Force = 2x GRAVITY. GRAVITY is 0.05, so 0.1.
+                        // Direction is from Ship to Mine (so -dx, -dy)
+                        const angle = Math.atan2(-dy, -dx);
+                        const force = 0.1; // 2 * GRAVITY
+
+                        // Apply to ship
+                        ship.vx += Math.cos(angle) * force * dt;
+                        ship.vy += Math.sin(angle) * force * dt;
+
+                        // Mine stays still
+                        mine.vx = 0;
+                        mine.vy = 0;
+                    }
+                } else {
+                    // Idle - Stationary
+                    mine.vx = 0;
+                    mine.vy = 0;
+                }
+
+                // Apply Velocity
+                mine.x += mine.vx * dt;
+                mine.y += mine.vy * dt;
+
+                // Wall Collisions
+                const { floorY, ceilingY } = getTerrainAt(mine.x, mine.y);
+                if (floorY !== null && mine.y + mine.radius >= floorY) {
+                    mine.y = floorY - mine.radius;
+                    mine.vy *= -0.8; // Bounce
+                }
+                if (ceilingY !== null && mine.y - mine.radius <= ceilingY) {
+                    mine.y = ceilingY + mine.radius;
+                    mine.vy *= -0.8; // Bounce
+                }
+
+                // Ship Collision
+                if (mine.state === 'active' && dist < mine.radius + ship.radius) {
+                    mine.active = false; // Disable mine so it doesn't explode again
+                    createExplosion(mine.x, mine.y);
+                    crash();
+                }
+            });
+        }
+
+        function updateParticles(dt) {
+            for (let i = gameState.particles.length - 1; i >= 0; i--) {
+                const p = gameState.particles[i];
+                p.life -= (p.decay || 0.02) * dt; // Use custom decay or default
+                p.x += p.vx * dt;
+                p.y += p.vy * dt;
+
+                if (p.type === 'smoke') {
+                    p.size += 0.05 * dt;
+                }
+
+                // Wall collision (Start wall at x=-100)
+                if (p.x < -100) {
+                    p.x = -100;
+                    p.vx *= -0.5; // Bounce off wall
+                }
+
+                // Particle Collision with Terrain
+                const { floorY, ceilingY } = getTerrainAt(p.x, p.y);
+
+                if (floorY !== null && p.y >= floorY) {
+                    p.y = floorY - 1;
+                    p.vy *= -0.2; // Reduced bounce
+                    p.vx *= 0.8; // Friction
+                }
+
+                if (ceilingY !== null && p.y <= ceilingY) {
+                    p.y = ceilingY + 1;
+                    p.vy *= -0.2; // Reduced bounce
+                    p.vx *= 0.8; // Friction
+                }
+
+                if (p.life <= 0) {
+                    gameState.particles.splice(i, 1);
+                }
+            }
+        }
+
+        function draw() {
+            // Clear background
+            ctx.fillStyle = '#050510';
+            ctx.fillRect(0, 0, width, height);
+
+            // Camera transform
+            ctx.save();
+
+            // Smooth camera follow
+            const z = gameState.camera.zoom;
+            // Target coordinates are in world space (ship location), then translated to keep ship at screen center
+            const targetX = -ship.x * z + width / 2;
+            const targetY = -ship.y * z + height / 2;
+            gameState.camera.x += (targetX - gameState.camera.x) * 0.1;
+            gameState.camera.y += (targetY - gameState.camera.y) * 0.1;
+
+            ctx.translate(gameState.camera.x, gameState.camera.y);
+            ctx.scale(z, z);
+
+            // Draw Terrain
+            ctx.lineWidth = 2;
+
+            // Visible range in world space
+            const worldMinX = -gameState.camera.x / z;
+            const worldMaxX = (-gameState.camera.x + width) / z;
+            const worldMinY = -gameState.camera.y / z;
+            const worldMaxY = (-gameState.camera.y + height) / z;
+
+            const startCol = Math.floor(worldMinX / terrain.cellSize);
+            const endCol = Math.floor(worldMaxX / terrain.cellSize);
+            const startRow = Math.floor(worldMinY / terrain.cellSize);
+            const endRow = Math.floor(worldMaxY / terrain.cellSize);
+
+            for (let c = startCol - 1; c <= endCol + 1; c++) {
+                for (let r = startRow - 1; r <= endRow + 1; r++) {
+                    const key = `${c},${r}`;
+                    const bucket = terrain.grid2D[key];
+                    if (bucket) {
+                        bucket.forEach(seg => {
+                            ctx.strokeStyle = seg.color;
+                            ctx.beginPath();
+                            ctx.moveTo(seg.p1.x, seg.p1.y);
+                            ctx.lineTo(seg.p2.x, seg.p2.y);
+                            ctx.stroke();
+                        });
+                    }
+                }
+            }
+
+            // Draw Finish Line
+            if (terrain.finishLine) {
+                ctx.strokeStyle = '#6366f1';
+                ctx.lineWidth = 4;
+                ctx.setLineDash([10, 10]);
+                ctx.beginPath();
+                ctx.moveTo(terrain.finishLine.p1.x, terrain.finishLine.p1.y);
+                ctx.lineTo(terrain.finishLine.p2.x, terrain.finishLine.p2.y);
+                ctx.stroke();
+                ctx.setLineDash([]);
+            }
+
+            // Draw Particles
+            gameState.particles.forEach(p => {
+                ctx.globalAlpha = p.life;
+                ctx.fillStyle = p.color;
+                ctx.strokeStyle = p.color;
+
+                // Draw as circle
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                ctx.fill();
+            });
+            ctx.globalAlpha = 1;
+
+            // Draw Mines
+            gameState.mines.forEach(mine => {
+                if (!mine.active) return;
+                // Only draw if visible
+                if (mine.x < worldMinX - 100 || mine.x > worldMaxX + 100) return;
+
+                ctx.save();
+                ctx.translate(mine.x, mine.y);
+
+                if (mine.state === 'active') {
+                    if (mine.type === 'seeker') {
+                        ctx.fillStyle = '#ef4444'; // Red
+                        ctx.shadowColor = '#ef4444';
+                    } else {
+                        ctx.fillStyle = '#a855f7'; // Purple
+                        ctx.shadowColor = '#a855f7';
+                    }
+                    ctx.shadowBlur = 15;
+                } else {
+                    ctx.fillStyle = '#475569'; // Slate
+                    ctx.shadowColor = 'transparent';
+                    ctx.shadowBlur = 0;
+                }
+
+                ctx.beginPath();
+                ctx.arc(0, 0, mine.radius, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Inner detail
+                ctx.fillStyle = 'rgba(255,255,255,0.2)';
+                ctx.beginPath();
+                ctx.arc(-3, -3, mine.radius * 0.4, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.restore();
+            });
+
+            // Draw Ship
+            if (gameState.status !== GAME_STATUS.CRASHED) {
+                ctx.save();
+                ctx.translate(ship.x, ship.y);
+                ctx.rotate(ship.angle);
+
+
+                // Draw Flame if thrusting
+                if (keys.ArrowUp || keys.KeyW) { // Check input state for thrust
+                    // We need to check if we are actually thrusting. 
+                    // The updatePhysics function sets ship.landed = false if thrusting.
+                    // But we don't have a direct 'isThrusting' flag on the ship.
+                    // However, we can infer it from input keys or check if we want to add a flag.
+                    // Let's use the input keys directly here for visual feedback.
+                    const isThrusting = keys.ArrowUp || keys.KeyW; // Simplified check
+
+                    if (isThrusting) {
+                        ctx.fillStyle = Math.random() > 0.5 ? '#fbbf24' : '#ef4444'; // Flicker color
+                        ctx.beginPath();
+                        ctx.moveTo(-5, 0); // Engine center
+                        const flameHeight = 15 + Math.random() * 10; // Varying height
+                        ctx.lineTo(-flameHeight - 5, 0); // Tip of flame (pointing back)
+                        // Actually, inverted triangle means base at ship, point away.
+                        // Ship points right (0 deg) in local space? No, ship points along positive X in local space (nose at 15, 0).
+                        // So back is negative X.
+                        // We want a triangle at the back.
+                        // Base: (-5, -3) to (-5, 3)
+                        // Tip: (-5 - flameHeight, 0)
+
+                        ctx.beginPath();
+                        ctx.moveTo(-5, -3);
+                        ctx.lineTo(-5, 3);
+                        ctx.lineTo(-5 - flameHeight, 0);
+                        ctx.closePath();
+                        ctx.fill();
+                    }
+                }
+
+                ctx.fillStyle = ship.color;
+
+                ctx.beginPath();
+                // Triangle ship
+                ctx.moveTo(15, 0); // Nose
+                ctx.lineTo(-10, 10); // Left wing
+                ctx.lineTo(-5, 0); // Engine indent
+                ctx.lineTo(-10, -10); // Right wing
+                ctx.closePath();
+                ctx.fill();
+
+                // Add stroke
+                ctx.lineWidth = 2;
+                ctx.strokeStyle = '#ffffff';
+                ctx.stroke();
+
+
+                ctx.restore();
+            }
+
+            ctx.restore();
+
+            // Update UI
+
+            if (terrain.finishLine) {
+                const goalX = (terrain.finishLine.p1.x + terrain.finishLine.p2.x) / 2;
+                const goalY = (terrain.finishLine.p1.y + terrain.finishLine.p2.y) / 2;
+                const distPixels = Math.sqrt(Math.pow(goalX - ship.x, 2) + Math.pow(goalY - ship.y, 2));
+                const distMeters = Math.round(distPixels * (3 / 25)); // Ship length ~25px = 3m
+                document.getElementById('distance-display').innerText = `DIST: ${distMeters.toLocaleString()} m`;
+            } else {
+                document.getElementById('distance-display').innerText = `DIST: 0 m`;
+            }
+        }
+
+        function loop(timestamp) {
+            if (!lastTime) lastTime = timestamp;
+            const deltaTimeMillis = timestamp - lastTime;
+            lastTime = timestamp;
+
+            // Target 60 FPS (16.67ms per frame)
+            const dt = deltaTimeMillis / (1000 / 60);
+            if (gameState.status === GAME_STATUS.PLAYING) {
+                updatePhysics(dt);
+                updateMines(dt);
+            }
+            updateParticles(dt);
+
+            draw();
+
+            animationId = requestAnimationFrame(loop);
+        }
+
+        // Initial draw
+        resize();
+        generateLevel();
+        draw();
+
+    </script>
+</body>
+
+</html>
