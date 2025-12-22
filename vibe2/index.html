@@ -130,7 +130,8 @@
             bLastCeiling: null,
             tunnelWidth: 400,
             fFinishGenerated: false,
-            bFinishGenerated: false
+            bFinishGenerated: false,
+            sineOffset: 0
         };
 
         function resize() {
@@ -342,7 +343,7 @@
             return {
                 length: parseInt(params.get('length') ?? 1000),
                 seed: parseInt(params.get('seed') ?? Math.floor(Math.random() * 100)),
-                mines: parseInt(params.get('mines') ?? 4),
+                mines: parseInt(params.get('mines') ?? 3),
                 zoom: parseFloat(params.get('zoom') ?? 1.0)
             };
         }
@@ -435,13 +436,35 @@
                     break;
                 }
 
-                const len = 50 + seededRandom() * 100;
-                let angle = (Math.sin(i * 0.1) * 1.0) + (seededRandom() - 0.5) * 0.5;
+                const len = 40 + seededRandom() * 140;
+                const sectionIndex = Math.floor(i / 20);
+                const mode = Math.floor(seededRandom() * 4);
+                let angle;
+
+                if (mode === 0) {
+                    // Mode 0: Flowing Sine (Classic)
+                    const si = i + terrain.sineOffset;
+                    angle = (Math.sin(si * 0.07) * 0.5) + (Math.sin(si * 0.17) * 0.4) + (seededRandom() - 0.5) * 0.5;
+                } else if (mode === 1) {
+                    // Mode 1: Steady Drift (Picks an angle and maintains it with some noise)
+                    // Use a simple hash of section index for consistent drift within the section
+                    const drift = ((Math.sin(sectionIndex * 1.57) * 1000) % 1) * 2 - 1; // -1 to 1
+                    angle = drift * 1.1 + (seededRandom() - 0.5) * 0.4;
+                } else if (mode === 2) {
+                    // Mode 2: Jagged Chaos (No trend, pure aggressive noise)
+                    angle = (seededRandom() - 0.5) * 2.8;
+                } else {
+                    // Mode 3: Tight Corridors (Near horizontal, low noise)
+                    angle = (seededRandom() - 0.5) * 0.3;
+                }
+
+                // Global clamp to keep it mostly forward-ish but allow very steep sections
+                angle = Math.max(-1.48, Math.min(1.48, angle));
                 if (!isForward) angle = Math.PI - angle;
 
                 const nx = lastFloor.x + Math.cos(angle) * len;
                 const ny = lastFloor.y + Math.sin(angle) * len;
-                const currentWidth = terrain.tunnelWidth + (seededRandom() - 0.5) * 100;
+                const currentWidth = terrain.tunnelWidth * (0.8 + seededRandom() * 0.4);
 
                 let floorP = { x: nx, y: ny };
                 let ceilingP = {
@@ -595,6 +618,7 @@
             terrain.bFinishLine = null;
             terrain.fFinishGenerated = false;
             terrain.bFinishGenerated = false;
+            terrain.sineOffset = seededRandom() * 1000;
 
             // Start Pad
             const startNode = new TerrainNode();

@@ -1,10 +1,9 @@
 # Remember Mister Sprinkles
 
-Random mostly vibe-coded stuff.
+Random stuff just for fun. Mostly vibe-coded with Google Antigravity and Gemini 3.
 
 ## Vibe 1 - Asteroid Hunter
 
-Built using Google Antigravity + Gemini 3 Pro (High).
 Ship, missiles, comments, asteroids.
 
 [Default Mode](https://fmilitao.github.io/remember-mister-sprinkles/vibe1).
@@ -13,12 +12,13 @@ Ship, missiles, comments, asteroids.
 
 [Two Asteroids, 2s Comet Spawns And 3s Missiles Spawns](https://fmilitao.github.io/remember-mister-sprinkles/vibe1?asteroids=2&comets=2&missiles=3).
 
-## Vibe 2 - Space Escapte
+## Vibe 2 - Space Escape
 
-Built using Google Antigravity + Gemini 3 Pro (High).
 Ship, Tunnel, Mines, Finish Line.
 
 [Default Mode](https://fmilitao.github.io/remember-mister-sprinkles/vibe2).
 
-[Fixed Seed, Easy Mode, 100 Length](https://fmilitao.github.io/remember-mister-sprinkles/vibe2?seed=1&mines=0&length=100).
+[Fixed Seed, No Mines, 2 km](https://fmilitao.github.io/remember-mister-sprinkles/vibe2?seed=212&mines=0&length=2000&zoom=1.0).
+
+[Fixed Seed, Mines, 1 km](https://fmilitao.github.io/remember-mister-sprinkles/vibe2?seed=2028&mines=3&length=1000&zoom=0.8).
 
