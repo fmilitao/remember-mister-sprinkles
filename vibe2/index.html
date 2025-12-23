@@ -218,6 +218,7 @@
         let joystickHasMoved = false;
         let joystickAngle = 0;
         let joystickCenter = { x: 0, y: 0 };
+        let joystickTouchId = null;
         const maxRadius = 35;
 
         const btnThrust = document.getElementById('btnThrust');
@@ -225,22 +226,40 @@
         const joystickKnob = document.getElementById('joystickKnob');
 
         function setupTouchControl(elem, code, onStart) {
+            let activeTouches = new Set();
+
             const handleStart = (e) => {
                 e.preventDefault();
+                if (e.changedTouches) {
+                    for (let i = 0; i < e.changedTouches.length; i++) {
+                        activeTouches.add(e.changedTouches[i].identifier);
+                    }
+                }
+
                 if (onStart) {
                     if (onStart()) return;
                 }
                 keys[code] = true;
                 elem.classList.add('active');
             };
+
             const handleEnd = (e) => {
                 e.preventDefault();
-                keys[code] = false;
-                elem.classList.remove('active');
+                if (e.changedTouches) {
+                    for (let i = 0; i < e.changedTouches.length; i++) {
+                        activeTouches.delete(e.changedTouches[i].identifier);
+                    }
+                }
+
+                if (activeTouches.size === 0) {
+                    keys[code] = false;
+                    elem.classList.remove('active');
+                }
             };
 
             elem.addEventListener('touchstart', handleStart, { passive: false });
             elem.addEventListener('touchend', handleEnd, { passive: false });
+            elem.addEventListener('touchcancel', handleEnd, { passive: false });
             elem.addEventListener('mousedown', handleStart);
             elem.addEventListener('mouseup', handleEnd);
             elem.addEventListener('mouseleave', handleEnd);
@@ -258,21 +277,21 @@
 
         function handleJoystickStart(e) {
             e.preventDefault();
+
+            let touch;
+            if (e.changedTouches) {
+                touch = e.changedTouches[0];
+                joystickTouchId = touch.identifier;
+            } else {
+                touch = e;
+            }
+
             joystickActive = true;
             joystickHasMoved = false;
 
-            let clientX, clientY;
-            if (e.touches) {
-                clientX = e.touches[0].clientX;
-                clientY = e.touches[0].clientY;
-            } else {
-                clientX = e.clientX;
-                clientY = e.clientY;
-            }
-
             joystickCenter = {
-                x: clientX,
-                y: clientY
+                x: touch.clientX,
+                y: touch.clientY
             };
             // Don't call move yet to establish neutral start
         }
@@ -281,17 +300,22 @@
             if (!joystickActive) return;
             e.preventDefault();
 
-            let clientX, clientY;
+            let touch = null;
             if (e.touches) {
-                clientX = e.touches[0].clientX;
-                clientY = e.touches[0].clientY;
+                for (let i = 0; i < e.touches.length; i++) {
+                    if (e.touches[i].identifier === joystickTouchId) {
+                        touch = e.touches[i];
+                        break;
+                    }
+                }
             } else {
-                clientX = e.clientX;
-                clientY = e.clientY;
+                touch = e;
             }
 
-            let deltaX = clientX - joystickCenter.x;
-            let deltaY = clientY - joystickCenter.y;
+            if (!touch) return;
+
+            let deltaX = touch.clientX - joystickCenter.x;
+            let deltaY = touch.clientY - joystickCenter.y;
 
             const distance = Math.sqrt(deltaX * deltaX + deltaY * deltaY);
 
@@ -312,8 +336,20 @@
         }
 
         function handleJoystickEnd(e) {
+            if (e.changedTouches) {
+                let found = false;
+                for (let i = 0; i < e.changedTouches.length; i++) {
+                    if (e.changedTouches[i].identifier === joystickTouchId) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) return;
+            }
+
             e.preventDefault();
             joystickActive = false;
+            joystickTouchId = null;
             joystickHasMoved = false;
             joystickKnob.style.transform = `translate(-50%, -50%)`;
         }
