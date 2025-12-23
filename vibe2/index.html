@@ -244,25 +244,20 @@
             };
 
             const handleEnd = (e) => {
-                e.preventDefault();
                 if (e.changedTouches) {
                     for (let i = 0; i < e.changedTouches.length; i++) {
                         activeTouches.delete(e.changedTouches[i].identifier);
                     }
                 }
+                if (activeTouches.size > 0) return;
 
-                if (activeTouches.size === 0) {
-                    keys[code] = false;
-                    elem.classList.remove('active');
-                }
+                keys[code] = false;
+                elem.classList.remove('active');
             };
 
             elem.addEventListener('touchstart', handleStart, { passive: false });
             elem.addEventListener('touchend', handleEnd, { passive: false });
             elem.addEventListener('touchcancel', handleEnd, { passive: false });
-            elem.addEventListener('mousedown', handleStart);
-            elem.addEventListener('mouseup', handleEnd);
-            elem.addEventListener('mouseleave', handleEnd);
         }
 
         if (btnThrust) {
@@ -278,13 +273,9 @@
         function handleJoystickStart(e) {
             e.preventDefault();
 
-            let touch;
-            if (e.changedTouches) {
-                touch = e.changedTouches[0];
-                joystickTouchId = touch.identifier;
-            } else {
-                touch = e;
-            }
+            if (!e.changedTouches) return;
+            const touch = e.changedTouches[0];
+            joystickTouchId = touch.identifier;
 
             joystickActive = true;
             joystickHasMoved = false;
@@ -308,8 +299,6 @@
                         break;
                     }
                 }
-            } else {
-                touch = e;
             }
 
             if (!touch) return;
@@ -336,16 +325,16 @@
         }
 
         function handleJoystickEnd(e) {
-            if (e.changedTouches) {
-                let found = false;
-                for (let i = 0; i < e.changedTouches.length; i++) {
-                    if (e.changedTouches[i].identifier === joystickTouchId) {
-                        found = true;
-                        break;
-                    }
+            if (!e.changedTouches) return;
+
+            let found = false;
+            for (let i = 0; i < e.changedTouches.length; i++) {
+                if (e.changedTouches[i].identifier === joystickTouchId) {
+                    found = true;
+                    break;
                 }
-                if (!found) return;
             }
+            if (!found) return;
 
             e.preventDefault();
             joystickActive = false;
@@ -358,9 +347,6 @@
             joystickContainer.addEventListener('touchstart', handleJoystickStart, { passive: false });
             joystickContainer.addEventListener('touchmove', handleJoystickMove, { passive: false });
             joystickContainer.addEventListener('touchend', handleJoystickEnd, { passive: false });
-            joystickContainer.addEventListener('mousedown', handleJoystickStart);
-            window.addEventListener('mousemove', handleJoystickMove);
-            window.addEventListener('mouseup', handleJoystickEnd);
         }
 
         // --- Core Logic ---
