@@ -590,21 +590,22 @@
                 }
             }
 
-            // 2. Spawn new mines if below target
+            // 2. Attempt a single spawn if below target
             if (gameState.mines.length < targetCount) {
                 const spawnRange = 2000;
-                for (let attempts = 0; attempts < 5; attempts++) {
-                    if (gameState.mines.length >= targetCount) break;
+                const minDistanceFromShip = 400;
 
-                    const rx = ship.x + (seededRandom() - 0.5) * spawnRange * 2;
-                    if (Math.abs(rx - ship.x) < 300) continue;
+                const rx = ship.x + (seededRandom() - 0.5) * spawnRange * 2;
 
-                    const { floorY, ceilingY } = getTerrainAt(rx, 0);
+                // Only proceed if far enough from ship horizontally
+                if (Math.abs(rx - ship.x) >= minDistanceFromShip) {
+                    const { floorY, ceilingY } = getTerrainAt(rx, ship.y);
                     if (floorY !== null && ceilingY !== null) {
                         const minY = Math.min(floorY, ceilingY);
                         const maxY = Math.max(floorY, ceilingY);
                         const height = maxY - minY;
 
+                        // Check if there is enough vertical space
                         if (height > 100) {
                             gameState.mines.push({
                                 x: rx,
