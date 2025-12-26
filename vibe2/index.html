@@ -88,7 +88,8 @@
             status: GAME_STATUS.START,
             camera: { x: 0, y: 0, zoom: 1 },
             particles: [],
-            mines: []
+            mines: [],
+            mineSpawnTimer: 0
         };
 
         const ship = {
@@ -589,45 +590,113 @@
         function updateDynamicMines() {
             const params = getUrlParams();
             const targetCount = params.mines;
+            const spawnRange = 1500;
 
-            // 1. Cull far mines
-            const cullDistance = 2500;
-            for (let i = gameState.mines.length - 1; i >= 0; i--) {
-                const dist = Math.abs(gameState.mines[i].x - ship.x);
-                if (dist > cullDistance) {
-                    gameState.mines.splice(i, 1);
+            const MAX_GAP = Math.max(500, (spawnRange * 2) / (Math.max(1, targetCount) / 2));
+
+            // 1. Mark far mines as inactive
+            let activeCount = 0;
+            for (const mine of gameState.mines) {
+                if (mine.active) {
+                    if (Math.abs(mine.x - ship.x) > spawnRange + 500) {
+                        mine.active = false;
+                    } else {
+                        activeCount++;
+                    }
                 }
             }
 
-            // 2. Attempt a single spawn if below target
-            if (gameState.mines.length < targetCount) {
-                const spawnRange = 2000;
-                const minDistanceFromShip = 400;
+            if (activeCount >= targetCount) return;
 
-                const rx = ship.x + (seededRandom() - 0.5) * spawnRange * 2;
+            // 2. Find nearest active mines ahead and behind to check for gaps
+            let ahead = null;
+            let behind = null;
+            for (const mine of gameState.mines) {
+                if (!mine.active) continue;
+                if (mine.x > ship.x) {
+                    if (!ahead || mine.x < ahead.x) ahead = mine;
+                } else {
+                    if (!behind || mine.x > behind.x) behind = mine;
+                }
+            }
 
-                // Only proceed if far enough from ship horizontally
-                if (Math.abs(rx - ship.x) >= minDistanceFromShip) {
-                    const { floorY, ceilingY } = getTerrainAt(rx, ship.y);
-                    if (floorY !== null && ceilingY !== null) {
-                        const minY = Math.min(floorY, ceilingY);
-                        const maxY = Math.max(floorY, ceilingY);
-                        const height = maxY - minY;
+            // 3. Detect gap (prioritize direction of travel)
+            let spawnBaseX = null;
+            const gapRight = ahead ? (ahead.x - ship.x) : Infinity;
+            const gapLeft = behind ? (ship.x - behind.x) : Infinity;
 
-                        // Check if there is enough vertical space
-                        if (height > 100) {
-                            gameState.mines.push({
-                                x: rx,
-                                y: minY + height * (0.2 + seededRandom() * 0.6),
-                                vx: 0,
-                                vy: 0,
-                                radius: 12,
-                                state: 'idle',
-                                active: true,
-                                type: seededRandom() > 0.3 ? 'seeker' : 'gravity'
-                            });
-                        }
+            if (ship.vx >= -0.1) { // Moving right or mostly stationary
+                if (gapRight > MAX_GAP) spawnBaseX = ship.x + MAX_GAP;
+                else if (gapLeft > MAX_GAP) spawnBaseX = ship.x - MAX_GAP;
+            } else { // Moving left
+                if (gapLeft > MAX_GAP) spawnBaseX = ship.x - MAX_GAP;
+                else if (gapRight > MAX_GAP) spawnBaseX = ship.x + MAX_GAP;
+            }
+
+            if (spawnBaseX === null) return;
+
+            // 4. Pattern Spawner
+            const getInactiveMine = () => {
+                let mine = gameState.mines.find(m => !m.active);
+                if (!mine && gameState.mines.length < targetCount) {
+                    mine = { active: false };
+                    gameState.mines.push(mine);
+                }
+                return mine;
+            };
+
+            const configureMine = (mine, x, y, type) => {
+                if (!mine) return;
+                mine.x = x;
+                mine.y = y;
+                mine.vx = 0;
+                mine.vy = 0;
+                mine.radius = 12;
+                mine.state = 'idle';
+                mine.active = true;
+                mine.type = type;
+                delete mine.timer;
+                activeCount++;
+            };
+
+            const roll = seededRandom();
+            const { floorY, ceilingY } = getTerrainAt(spawnBaseX, ship.y);
+            if (floorY === null || ceilingY === null) return;
+            const minY = Math.min(floorY, ceilingY);
+            const maxY = Math.max(floorY, ceilingY);
+            const h = maxY - minY;
+            const midY = minY + h / 2;
+
+            // Pattern direction: grow AWAY from ship
+            const step = (spawnBaseX > ship.x) ? 300 : -300;
+
+            if (roll < 0.4) {
+                // Pattern: The Gate (2 mines)
+                if (activeCount < targetCount) configureMine(getInactiveMine(), spawnBaseX, minY + h * 0.2, 'gravity');
+                if (activeCount < targetCount) configureMine(getInactiveMine(), spawnBaseX, minY + h * 0.8, 'gravity');
+            } else if (roll < 0.7) {
+                // Pattern: The Slalom (3 staggered mines)
+                for (let i = 0; i < 3; i++) {
+                    if (activeCount >= targetCount) break;
+                    const sx = spawnBaseX + i * step;
+
+                    // Safety: don't spawn too close to ship
+                    if (Math.abs(sx - ship.x) < 200) continue;
+
+                    const { floorY: fY, ceilingY: cY } = getTerrainAt(sx, ship.y);
+                    if (fY !== null && cY !== null) {
+                        const sy = (i % 2 === 0) ? fY - 50 : cY + 50;
+                        configureMine(getInactiveMine(), sx, sy, 'seeker');
                     }
+                }
+            } else {
+                // Pattern: The Singularity (1 Bomb + 2 Seekers)
+                if (activeCount < targetCount) configureMine(getInactiveMine(), spawnBaseX, midY, 'bomb');
+                if (activeCount < targetCount && Math.abs((spawnBaseX + step / 2) - ship.x) > 200) {
+                    configureMine(getInactiveMine(), spawnBaseX + step / 2, midY - 60, 'seeker');
+                }
+                if (activeCount < targetCount && Math.abs((spawnBaseX + step / 2) - ship.x) > 200) {
+                    configureMine(getInactiveMine(), spawnBaseX + step / 2, midY + 60, 'seeker');
                 }
             }
         }
@@ -767,7 +836,12 @@
 
         function updatePhysics(dt) {
             updateDynamicTerrain();
-            updateDynamicMines();
+
+            gameState.mineSpawnTimer += dt;
+            if (gameState.mineSpawnTimer >= 60) { // 60 frames = 1 second @ 60fps
+                updateDynamicMines();
+                gameState.mineSpawnTimer = 0;
+            }
 
             // Controls
             const thrusting = keys.ArrowUp || keys.KeyW;
@@ -1063,18 +1137,59 @@
                         }
                     } else if (mine.type === 'gravity') {
                         // Gravity Well (Ship moves to Mine)
-                        // Force = 2x GRAVITY. GRAVITY is 0.05, so 0.1.
-                        // Direction is from Ship to Mine (so -dx, -dy)
-                        const angle = Math.atan2(-dy, -dx);
-                        const force = 0.1; // 2 * GRAVITY
+                        const angleToMine = Math.atan2(-dy, -dx);
+                        const force = 1.5 * GRAVITY;
 
                         // Apply to ship
-                        ship.vx += Math.cos(angle) * force * dt;
-                        ship.vy += Math.sin(angle) * force * dt;
+                        ship.vx += Math.cos(angleToMine) * force * dt;
+                        ship.vy += Math.sin(angleToMine) * force * dt;
 
-                        // Mine stays still
-                        mine.vx = 0;
-                        mine.vy = 0;
+                        // Slow attraction (Mine moves toward Ship)
+                        const angleToShip = Math.atan2(dy, dx);
+                        const slowAccel = ACCEL * 0.3;
+                        mine.vx += Math.cos(angleToShip) * slowAccel * dt;
+                        mine.vy += Math.sin(angleToShip) * slowAccel * dt;
+
+                        // Cap speed for gravity mines (lower than seekers)
+                        const slowMaxSpeed = MAX_SPEED * 0.4;
+                        const speed = Math.sqrt(mine.vx * mine.vx + mine.vy * mine.vy);
+                        if (speed > slowMaxSpeed) {
+                            mine.vx = (mine.vx / speed) * slowMaxSpeed;
+                            mine.vy = (mine.vy / speed) * slowMaxSpeed;
+                        }
+                    } else if (mine.type === 'bomb') {
+                        // Fast Seeker attraction
+                        const angle = Math.atan2(dy, dx);
+                        const bombAccel = ACCEL * 1.5; // faster
+                        mine.vx += Math.cos(angle) * bombAccel * dt;
+                        mine.vy += Math.sin(angle) * bombAccel * dt;
+
+                        const bombMaxSpeed = MAX_SPEED * 1.4;
+                        const speed = Math.sqrt(mine.vx * mine.vx + mine.vy * mine.vy);
+                        if (speed > bombMaxSpeed) {
+                            mine.vx = (mine.vx / speed) * bombMaxSpeed;
+                            mine.vy = (mine.vy / speed) * bombMaxSpeed;
+                        }
+
+                        // Countdown
+                        if (mine.timer === undefined) mine.timer = 180; // 3 seconds @ 60fps
+                        mine.timer -= dt;
+
+                        if (mine.timer <= 0) {
+                            mine.active = false;
+                            createExplosion(mine.x, mine.y);
+
+                            // Shockwave
+                            const shockRadius = 300;
+                            const shockForce = 15;
+                            if (dist < shockRadius) {
+                                const shockAngle = Math.atan2(ship.y - mine.y, ship.x - mine.x);
+                                const forceScale = (1 - dist / shockRadius) * shockForce;
+                                ship.vx += Math.cos(shockAngle) * forceScale;
+                                ship.vy += Math.sin(shockAngle) * forceScale;
+                                ship.landed = false;
+                            }
+                        }
                     }
                 } else {
                     // Idle - Stationary
@@ -1229,11 +1344,17 @@
                     if (mine.type === 'seeker') {
                         ctx.fillStyle = '#ef4444'; // Red
                         ctx.shadowColor = '#ef4444';
+                    } else if (mine.type === 'bomb') {
+                        // Orange pulsing
+                        const pulse = Math.sin(Date.now() * 0.01) * 0.2 + 0.8;
+                        ctx.fillStyle = '#f97316'; // Orange
+                        ctx.shadowColor = '#f97316';
+                        ctx.shadowBlur = 15 * pulse;
                     } else {
                         ctx.fillStyle = '#a855f7'; // Purple
                         ctx.shadowColor = '#a855f7';
                     }
-                    ctx.shadowBlur = 15;
+                    ctx.shadowBlur = mine.type === 'bomb' ? ctx.shadowBlur : 15;
                 } else {
                     ctx.fillStyle = '#475569'; // Slate
                     ctx.shadowColor = 'transparent';
