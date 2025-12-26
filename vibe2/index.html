@@ -23,14 +23,18 @@
         <h1 id="msg-title">Space Escape</h1>
         <p id="msg-body"><!--to be replaced--></p>
         <button id="start-btn">Start</button>
-        <div style="display: flex; gap: 10px; margin-top: 10px;">
-            <button id="seed-btn"
-                style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); margin: 0; flex: 1; height: 46px; display: flex; align-items: center; justify-content: center;">Level</button>
-            <button id="random-seed-btn" title="Random Level"
-                style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); margin: 0; width: 50px; height: 46px; display: flex; align-items: center; justify-content: center; padding: 0;">🎲</button>
+        <div class="settings-row">
+            <div class="setting-item">
+                <label>Seed</label>
+                <input type="number" id="seed-input" title="Change Seed">
+            </div>
+            <div class="setting-item">
+                <label>Mines</label>
+                <input type="number" id="mines-input" title="Mines Count">
+            </div>
         </div>
         <button id="fs-btn"
-            style="margin-left: 10px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3);">Full
+            style="background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); padding: 8px 16px; font-size: 12px; margin-top: 20px;">Full
             Screen</button>
     </div>
 
@@ -190,7 +194,18 @@
             url.searchParams.set('seed', newSeed);
             window.history.pushState({}, '', url);
             generateLevel();
-            // Reset ship for preview
+            resetShipForPreview();
+        };
+
+        const applyMines = (newCount) => {
+            const url = new URL(window.location.href);
+            url.searchParams.set('mines', newCount);
+            window.history.pushState({}, '', url);
+            generateLevel();
+            resetShipForPreview();
+        };
+
+        function resetShipForPreview() {
             ship.x = 0;
             ship.y = 89;
             ship.vx = 0;
@@ -200,18 +215,25 @@
             if (gameState.status !== GAME_STATUS.PLAYING) {
                 gameState.status = GAME_STATUS.START;
             }
-        };
+        }
 
-        document.getElementById('seed-btn').addEventListener('click', () => {
-            const currentSeed = getUrlParams().seed;
-            const newSeed = prompt('Enter a level seed (number):', currentSeed);
-            if (newSeed !== null && newSeed !== '') {
-                applySeed(newSeed);
+        const seedInput = document.getElementById('seed-input');
+        const minesInput = document.getElementById('mines-input');
+
+        seedInput.addEventListener('change', (e) => applySeed(e.target.value));
+        seedInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                applySeed(e.target.value);
+                seedInput.blur();
             }
         });
 
-        document.getElementById('random-seed-btn').addEventListener('click', () => {
-            applySeed(Math.floor(Math.random() * 10000));
+        minesInput.addEventListener('change', (e) => applyMines(e.target.value));
+        minesInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                applyMines(e.target.value);
+                minesInput.blur();
+            }
         });
 
         // --- Mobile Controls Logic ---
@@ -367,7 +389,7 @@
                 length: parseInt(params.get('length') ?? 1000),
                 seed: parseInt(params.get('seed') ?? Math.floor(Math.random() * 100)),
                 mines: parseInt(params.get('mines') ?? 3),
-                zoom: parseFloat(params.get('zoom') ?? 1.0)
+                zoom: parseFloat(params.get('zoom') ?? 0.8)
             };
         }
 
@@ -616,9 +638,12 @@
             gameState.camera.zoom = params.zoom;
             terrain.targetDistance = params.length * (25 / 3); // Convert meters to pixels (25px = 3m)
 
-            // Update Level button text
-            const seedBtn = document.getElementById('seed-btn');
-            if (seedBtn) seedBtn.innerText = `Seed: ${seed}`;
+            // Update UI inputs
+            const seedIn = document.getElementById('seed-input');
+            if (seedIn) seedIn.value = seed;
+
+            const minesIn = document.getElementById('mines-input');
+            if (minesIn) minesIn.value = params.mines;
 
             // Ensure params are in URL
             const url = new URL(window.location.href);
@@ -1217,12 +1242,6 @@
 
                 ctx.beginPath();
                 ctx.arc(0, 0, mine.radius, 0, Math.PI * 2);
-                ctx.fill();
-
-                // Inner detail
-                ctx.fillStyle = 'rgba(255,255,255,0.2)';
-                ctx.beginPath();
-                ctx.arc(-3, -3, mine.radius * 0.4, 0, Math.PI * 2);
                 ctx.fill();
 
                 ctx.restore();
